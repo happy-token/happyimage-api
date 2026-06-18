@@ -1,0 +1,69 @@
+services:
+  happyimage-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_IMAGE: ${HAPPYIMAGE_PYTHON_IMAGE:-python:3.13-slim}
+    image: happyimage-api:latest
+    container_name: happyimage-api
+    restart: unless-stopped
+    ports:
+      - "${HAPPYIMAGE_API_PORT:-8000}:80"
+    volumes:
+      - ./data:/app/data
+      - ./config.json:/app/config.json:rw
+    environment:
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-json}
+      DATABASE_URL: ${DATABASE_URL:-}
+      GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_TOKEN: ${GIT_TOKEN:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_FILE_PATH: ${GIT_FILE_PATH:-accounts.json}
+      HAPPYIMAGE_AUTH_KEY: ${HAPPYIMAGE_AUTH_KEY:-}
+      HAPPYIMAGE_BASE_URL: ${HAPPYIMAGE_BASE_URL:-}
+      HAPPYIMAGE_PROXY: ${HAPPYIMAGE_PROXY:-}
+      HAPPYIMAGE_REGISTRATION_ENABLED: ${HAPPYIMAGE_REGISTRATION_ENABLED:-true}
+      HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START: ${HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START:-true}
+      HAPPYIMAGE_THUMBNAIL_WIDTHS: ${HAPPYIMAGE_THUMBNAIL_WIDTHS:-640}
+
+      # ── Frontend / CORS ───────────────────────────────────────────
+      HAPPYIMAGE_FRONTEND_BASE_URL: ${HAPPYIMAGE_FRONTEND_BASE_URL:-http://localhost:3000}
+      HAPPYIMAGE_API_BASE_URL: ${HAPPYIMAGE_API_BASE_URL:-http://localhost:8000}
+      HAPPYIMAGE_CORS_ORIGINS: ${HAPPYIMAGE_CORS_ORIGINS:-}
+
+      # ── Session ───────────────────────────────────────────────────
+      HAPPYIMAGE_SESSION_SECRET: ${HAPPYIMAGE_SESSION_SECRET:-}
+      HAPPYIMAGE_SESSION_COOKIE_NAME: ${HAPPYIMAGE_SESSION_COOKIE_NAME:-happyimage_session}
+      HAPPYIMAGE_SESSION_MAX_AGE_SECONDS: ${HAPPYIMAGE_SESSION_MAX_AGE_SECONDS:-86400}
+
+      # ── OIDC ──────────────────────────────────────────────────────
+      HAPPYIMAGE_OIDC_ENABLED: ${HAPPYIMAGE_OIDC_ENABLED:-}
+      HAPPYIMAGE_OIDC_ISSUER: ${HAPPYIMAGE_OIDC_ISSUER:-}
+      HAPPYIMAGE_OIDC_CLIENT_ID: ${HAPPYIMAGE_OIDC_CLIENT_ID:-}
+      HAPPYIMAGE_OIDC_CLIENT_SECRET: ${HAPPYIMAGE_OIDC_CLIENT_SECRET:-}
+      HAPPYIMAGE_OIDC_SCOPES: ${HAPPYIMAGE_OIDC_SCOPES:-openid profile email}
+      HAPPYIMAGE_OIDC_ALLOWED_EMAIL_DOMAINS: ${HAPPYIMAGE_OIDC_ALLOWED_EMAIL_DOMAINS:-}
+      HAPPYIMAGE_OIDC_DEFAULT_IMAGE_QUOTA: ${HAPPYIMAGE_OIDC_DEFAULT_IMAGE_QUOTA:-0}
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/health?format=json', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  happyimage-web:
+    image: ${HAPPYIMAGE_WEB_IMAGE:-happytoken/happyimage-web}:${HAPPYIMAGE_WEB_TAG:-latest}
+    container_name: happyimage-web
+    restart: unless-stopped
+    ports:
+      - "${HAPPYIMAGE_WEB_PORT:-3000}:80"
+    depends_on:
+      - happyimage-api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,24 @@
+{
+  "source_repo": "https://github.com/EvoLinkAI/awesome-gpt-image-2-API-and-Prompts",
+  "license": "CC0-1.0",
+  "case_count": 533,
+  "image_count": 533,
+  "categories": {
+    "ad-creative": 31,
+    "character": 15,
+    "comparison": 61,
+    "ecommerce": 20,
+    "portrait": 145,
+    "poster": 176,
+    "ui": 85
+  },
+  "watermark_status": {
+    "needs_review": 497,
+    "not_requested_in_prompt": 4,
+    "suspected_from_prompt": 32
+  },
+  "notes": [
+    "Images/prompts are from the CC0 repository metadata, but brand/person/trademark rights still need review.",
+    "watermark_status is an automated first pass and should be reviewed before publishing."
+  ]
+}
