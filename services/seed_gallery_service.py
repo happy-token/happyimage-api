@@ -58,12 +58,18 @@ STYLE_CATEGORY_FALLBACKS = {
     "illustration": "illustration-art",
     "infographic": "infographic-chart",
     "landscape": "landscape-nature",
-    "portrait": "fashion-editorial",
+    "portrait": "portrait",
     "poster": "poster-design",
     "product": "product-photography",
     "social-media": "social-thumbnail",
     "typography": "logo-typography",
     "ui": "ui-design",
+}
+
+TITLE_CORRECTABLE_SOURCE_CATEGORIES = {
+    "",
+    "external",
+    "portrait",
 }
 
 PINNED_CATEGORY_ITEM_IDS = {
@@ -122,7 +128,7 @@ STYLE_CATEGORY_RULES = [
     ("sports-poster", ["sports", "soccer", "basketball", "football", "tennis", "athlete", "world cup", "运动", "足球", "篮球", "网球"]),
     ("poster-design", ["poster", "flyer", "key visual", "kv", "海报", "主视觉"]),
     ("logo-typography", ["typography", "type design", "lettering", "font", "wordmark", "calligraphic", "字体", "字母", "标志"]),
-    ("animal-pet", ["animal", "creature", "cat", "dog", "bird", "pet", "动物", "宠物", "猫", "狗"]),
+    ("animal-pet", ["animal", "creature", "cat", "dog", "bird", "pet", "动物", "生物", "宠物", "猫", "狗"]),
     ("interior-architecture", ["architecture", "interior", "room", "building", "cityscape", "skyline", "furniture", "建筑", "室内", "空间"]),
     ("landscape-nature", ["landscape", "nature", "forest", "mountain", "ocean", "beach", "desert", "valley", "sky", "风景", "自然", "森林", "山", "海", "沙漠"]),
     ("illustration-art", ["illustration", "watercolor", "oil painting", "line art", "sketch", "comic style", "插画", "水彩", "油画", "线稿"]),
@@ -130,6 +136,59 @@ STYLE_CATEGORY_RULES = [
     ("abstract-texture", ["abstract", "background", "wallpaper", "pattern", "gradient", "texture", "material", "材质", "纹理", "背景", "抽象"]),
     ("game-visual", ["game", "hud", "rpg", "pixel art", "battle screen", "gaming", "游戏", "战斗画面"]),
     ("editing-workflow", ["style transfer", "retexture", "edit", "replace", "remove", "restore", "upscale", "reference image", "uploaded image", "改图", "修复", "替换", "去除", "参考图"]),
+]
+
+PORTRAIT_TITLE_NEEDLES = [
+    "portrait",
+    "headshot",
+    "selfie",
+    "profile photo",
+    "business portrait",
+    "professional headshot",
+    "woman",
+    "girl",
+    "man",
+    "boy",
+    "couple",
+    "人像",
+    "肖像",
+    "写真",
+    "头像",
+    "自拍",
+    "人物",
+    "少女",
+    "女孩",
+    "美女",
+    "女性",
+    "男人",
+    "男孩",
+    "情侣",
+]
+
+PORTRAIT_TITLE_EXCLUSION_NEEDLES = [
+    "ad",
+    "advertisement",
+    "campaign",
+    "commercial",
+    "poster",
+    "flyer",
+    "product",
+    "packaging",
+    "infographic",
+    "diagram",
+    "chart",
+    "logo",
+    "typography",
+    "广告",
+    "海报",
+    "产品",
+    "商品",
+    "包装",
+    "信息图",
+    "图表",
+    "标志",
+    "字体",
+    "封面",
 ]
 
 
@@ -221,18 +280,27 @@ def _derive_style_category(item_id: object, original_category: object, title: ob
         return "portrait"
 
     original = re.sub(r"[^a-z0-9]+", "-", _clean(original_category).lower()).strip("-")
-    content_text = "\n".join([_clean(title), _clean(prompt)]).lower()
-    metadata_text = " ".join([*tags, original]).lower()
+    title_text = _clean(title).lower()
+    fallback_category = STYLE_CATEGORY_FALLBACKS.get(original, "external-inspiration")
+    title_is_portrait = _matches_any(title_text, PORTRAIT_TITLE_NEEDLES) and not _matches_any(
+        title_text,
+        PORTRAIT_TITLE_EXCLUSION_NEEDLES,
+    )
 
-    derived = _match_style_category(content_text)
-    derived_from_content = bool(derived)
-    if not derived:
-        derived = _match_style_category(metadata_text)
+    if title_is_portrait:
+        return "portrait"
 
-    if not derived:
-        derived = STYLE_CATEGORY_FALLBACKS.get(original, "external-inspiration")
+    if original not in TITLE_CORRECTABLE_SOURCE_CATEGORIES:
+        return fallback_category
 
-    return derived
+    title_category = _match_style_category(
+        title_text,
+        {"fashion-editorial", "infographic-chart", "interior-architecture"},
+    )
+    if original == "portrait":
+        return title_category or "portrait"
+
+    return title_category or fallback_category
 
 
 def _category_display_rank(category: str) -> int:
@@ -263,15 +331,12 @@ def _category_filter_rank(item: dict[str, Any], normalized_category: str) -> int
     if not normalized_category:
         return 0
     category = _clean(item.get("category")).lower()
-    aliases = {alias.lower() for alias in item.get("category_aliases", [])}
     item_id = _clean(item.get("id"))
     if item_id in PINNED_CATEGORY_ITEM_IDS.get(normalized_category, []):
         return 0
     if category == normalized_category:
         return 1
-    if normalized_category in aliases:
-        return 2
-    return 3
+    return 2
 
 
 def _source_display_rank(item_id: object) -> int:
@@ -456,16 +521,11 @@ class SeedGalleryService:
         normalized_category = category.strip().lower()
         normalized_watermark = watermark_status.strip().lower()
         if normalized_category:
-            if normalized_category == "portrait":
-                pinned_ids = set(PINNED_CATEGORY_ITEM_IDS["portrait"])
-                items = [item for item in items if item["id"] in pinned_ids]
-            else:
-                items = [
-                    item
-                    for item in items
-                    if item["category"].lower() == normalized_category
-                    or normalized_category in {alias.lower() for alias in item.get("category_aliases", [])}
-                ]
+            items = [
+                item
+                for item in items
+                if item["category"].lower() == normalized_category
+            ]
         if normalized_watermark:
             items = [item for item in items if item["watermark_status"].lower() == normalized_watermark]
         if normalized_query:
@@ -567,13 +627,11 @@ class SeedGalleryService:
         items = self._load_items()
         categories: dict[str, int] = {}
         watermark_statuses: dict[str, int] = {}
-        pinned_portrait_ids = set(PINNED_CATEGORY_ITEM_IDS["portrait"])
         for item in items:
             category = item["category"] or "uncategorized"
             watermark_status = item["watermark_status"] or "needs_review"
             categories[category] = categories.get(category, 0) + 1
             watermark_statuses[watermark_status] = watermark_statuses.get(watermark_status, 0) + 1
-        categories["portrait"] = sum(1 for item in items if item["id"] in pinned_portrait_ids)
         return {
             "total": len(items),
             "categories": dict(sorted(categories.items(), key=lambda entry: _category_count_sort_key(entry[0], entry[1]))),

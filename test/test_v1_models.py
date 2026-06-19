@@ -4,6 +4,7 @@ import json
 import unittest
 from unittest import mock
 
+import pytest
 import requests
 
 from services.protocol import openai_v1_models
@@ -68,6 +69,7 @@ class ModelListTests(unittest.TestCase):
         print("function result:")
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
+    @pytest.mark.live
     def test_list_models_http(self):
         """测试通过 HTTP 接口获取模型列表。"""
         response = requests.get(

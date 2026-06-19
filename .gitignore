@@ -16,6 +16,10 @@ config.json
 edit
 
 docker-compose-local.yml
+docker-compose.local.yml
+
+# Local ad-hoc scripts that may contain private hosts or proxy credentials
+scripts/test_proxies.py
 
 .claude/settings.local.json
 

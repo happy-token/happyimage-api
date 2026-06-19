@@ -137,6 +137,26 @@ class ShareDraftServiceTests(unittest.TestCase):
             self.assertEqual(items[0]["title"], "Persisted")
             self.assertEqual(items[0]["owner_id"], "owner-1")
 
+    def test_local_image_url_is_stored_without_expiring_token_and_resigned_on_read(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "share_drafts.json"
+            service = ShareDraftService(path)
+
+            saved = service.save_draft(
+                OWNER,
+                make_payload(
+                    image_url="http://app.test/images/2026/06/cat.png?image_token=old-token",
+                ),
+            )
+            raw_text = path.read_text(encoding="utf-8")
+            listed = service.list_drafts(OWNER)["items"][0]
+
+            self.assertEqual(saved["image_path"], "2026/06/cat.png")
+            self.assertNotIn("old-token", raw_text)
+            self.assertEqual(saved["image_url"].split("?", 1)[0], "http://app.test/images/2026/06/cat.png")
+            self.assertIn("image_token=", saved["image_url"])
+            self.assertIn("image_token=", listed["image_url"])
+
 
 if __name__ == "__main__":
     unittest.main()

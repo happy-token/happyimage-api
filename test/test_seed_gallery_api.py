@@ -78,7 +78,7 @@ def test_seed_gallery_lists_filters_and_serves_images(tmp_path: Path, monkeypatc
 
     client = TestClient(create_app())
 
-    response = client.get("/api/seed-gallery?category=ecommerce&query=studio")
+    response = client.get("/api/seed-gallery?category=ecommerce-main-image&query=studio")
     assert response.status_code == 200
     payload = response.json()
     assert payload["total"] == 1
@@ -135,6 +135,14 @@ def test_seed_gallery_portrait_filter_prioritizes_pinned_portraits(tmp_path: Pat
                     "tags": ["portrait", "commercial"],
                 },
                 {
+                    "id": "portrait-source-but-animal-sculpture",
+                    "title": "Creative Recycled Plastic Bag Sea Animal Sculpture",
+                    "category": "portrait",
+                    "prompt": "A sea animal sculpture made from recycled plastic bags",
+                    "local_images": ["images/sample.jpg"],
+                    "tags": ["fashion", "female-portrait", "poster"],
+                },
+                {
                     "id": pinned_id,
                     "title": "Pinned Fresh Portrait",
                     "category": "portrait",
@@ -165,14 +173,18 @@ def test_seed_gallery_portrait_filter_prioritizes_pinned_portraits(tmp_path: Pat
     response = client.get("/api/seed-gallery?category=portrait&limit=3")
     assert response.status_code == 200
     payload = response.json()
-    assert [item["id"] for item in payload["items"]] == [pinned_id]
+    assert [item["id"] for item in payload["items"]] == [
+        pinned_id,
+        "regular-lifestyle-portrait",
+    ]
+    assert payload["total"] == 2
     assert payload["items"][0]["category"] == "portrait"
 
     facets_response = client.get("/api/seed-gallery/facets")
     assert facets_response.status_code == 200
     categories = facets_response.json()["categories"]
     assert list(categories.items())[:3] == [
-        ("portrait", 1),
-        ("fashion-editorial", 1),
+        ("portrait", 2),
         ("product-photography", 1),
+        ("animal-pet", 1),
     ]

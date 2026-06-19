@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
 from PIL import Image
 
+from services import image_service
 from services.image_storage_service import ImageStorageService
 
 
@@ -74,7 +76,8 @@ class ImageStorageServiceTests(unittest.TestCase):
 
         self.assertEqual(stored.storage, "local")
         self.assertTrue((self.images_dir / stored.rel).is_file())
-        self.assertEqual(stored.url, f"http://app.test/images/{stored.rel}")
+        self.assertTrue(stored.url.startswith(f"http://app.test/images/{stored.rel}?"))
+        self.assertIn("image_token=", stored.url)
 
     def test_webdav_mode_uploads_without_local_file(self):
         self.settings.update({
@@ -133,6 +136,24 @@ class ImageStorageServiceTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertIn(".happyimage_webdav_test.txt", FakeWebDAVClient.deleted)
+
+    def test_download_zip_includes_remote_only_images(self):
+        rel = "2026/06/19/remote.png"
+        payload = png_bytes()
+
+        with (
+            mock.patch("services.image_service.config") as mock_config,
+            mock.patch("services.image_service.image_storage_service") as mock_storage,
+        ):
+            mock_config.images_dir = self.images_dir
+            mock_storage.get_bytes.return_value = payload
+
+            buf = image_service.download_images_zip([rel])
+
+        with zipfile.ZipFile(buf) as archive:
+            self.assertEqual(archive.namelist(), ["remote.png"])
+            self.assertEqual(archive.read("remote.png"), payload)
+        mock_storage.get_bytes.assert_called_once_with(rel)
 
 
 if __name__ == "__main__":

@@ -4,12 +4,15 @@ import json
 import time
 import unittest
 
+import pytest
 import requests
 
 from test.utils import save_image
 
 AUTH_KEY = "happyimage"
 BASE_URL = "http://localhost:8000"
+
+pytestmark = pytest.mark.live
 
 
 class ImageGenerationsTests(unittest.TestCase):

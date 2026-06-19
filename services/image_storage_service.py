@@ -15,6 +15,7 @@ from fastapi import HTTPException
 from PIL import Image
 
 from services.config import DATA_DIR, config
+from services.image_access_service import append_image_access_token
 
 IMAGE_INDEX_FILE = DATA_DIR / "image_index.json"
 IMAGE_INDEX_LOCK = Lock()
@@ -194,7 +195,8 @@ class ImageStorageService:
         public_base_url = _clean(settings.get("public_base_url"))
         if public_base_url:
             return f"{public_base_url.rstrip('/')}/{_safe_relative_path(rel)}"
-        return f"{(base_url or config.base_url).rstrip('/')}/images/{_safe_relative_path(rel)}"
+        safe_rel = _safe_relative_path(rel)
+        return append_image_access_token(f"{(base_url or config.base_url).rstrip('/')}/images/{safe_rel}", safe_rel)
 
     def make_relative_path(self, image_data: bytes) -> str:
         file_hash = hashlib.md5(image_data).hexdigest()

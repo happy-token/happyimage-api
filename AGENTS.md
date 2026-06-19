@@ -7,7 +7,7 @@ OpenAI-compatible image API and self-hosted creation workspace.
 - Project type: web app + API
 - Runtime: Docker
 - Service name: `happyimage`
-- Required secret: `HAPPYIMAGE_AUTH_KEY`
+- Required secrets: `HAPPYIMAGE_AUTH_KEY`, `HAPPYIMAGE_SESSION_SECRET`
 - Example health check: `curl -sf http://localhost:3000/health?format=json`
 - Docker deployment guide: `docs/docker-deployment.md`
 

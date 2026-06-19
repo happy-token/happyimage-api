@@ -1,7 +1,10 @@
 {
   "auth-key": "replace_with_a_strong_secret",
+  "registration_enabled": false,
+  "test_accounts_enabled": false,
   "refresh_account_interval_minute": 60,
   "image_retention_days": 15,
+  "image_access_token_ttl_seconds": 86400,
   "image_poll_timeout_secs": 120,
   "auto_remove_rate_limited_accounts": false,
   "auto_remove_invalid_accounts": true,
@@ -16,6 +19,7 @@
   "frontend_base_url": "",
   "api_base_url": "",
   "cors_origins": [],
+  "session_secret": "replace_with_a_different_strong_session_secret",
   "session_cookie_name": "happyimage_session",
   "session_max_age_seconds": 86400,
   "sensitive_words": [],

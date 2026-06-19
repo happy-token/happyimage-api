@@ -24,8 +24,11 @@ class ImagesEditsApiTests(unittest.TestCase):
             return {"created": 1, "data": [{"b64_json": base64.b64encode(b"out").decode("ascii")}]}
 
         self.handler_patcher = mock.patch.object(ai_module.openai_v1_image_edit, "handle", fake_handle)
+        self.identity_patcher = mock.patch.object(ai_module, "require_identity", return_value={"role": "admin"})
         self.handler_patcher.start()
+        self.identity_patcher.start()
         self.addCleanup(self.handler_patcher.stop)
+        self.addCleanup(self.identity_patcher.stop)
         app = FastAPI()
         app.include_router(ai_module.create_router())
         self.client = TestClient(app)

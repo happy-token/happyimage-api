@@ -17,7 +17,7 @@ fi
 case "${HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START:-false}" in
   1|true|TRUE|yes|YES|on|ON)
     echo "Pregenerating seed gallery thumbnails at widths: $THUMBNAIL_WIDTHS"
-    uv run python scripts/pregenerate_seed_gallery_thumbnails.py --widths "$THUMBNAIL_WIDTHS" --quiet
+    python scripts/pregenerate_seed_gallery_thumbnails.py --widths "$THUMBNAIL_WIDTHS" --quiet
     ;;
 esac
 

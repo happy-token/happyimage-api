@@ -10,6 +10,8 @@ services:
     restart: unless-stopped
     ports:
       - "${HAPPYIMAGE_API_PORT:-8000}:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./data:/app/data
       - ./config.json:/app/config.json:rw
@@ -23,7 +25,8 @@ services:
       HAPPYIMAGE_AUTH_KEY: ${HAPPYIMAGE_AUTH_KEY:-}
       HAPPYIMAGE_BASE_URL: ${HAPPYIMAGE_BASE_URL:-}
       HAPPYIMAGE_PROXY: ${HAPPYIMAGE_PROXY:-}
-      HAPPYIMAGE_REGISTRATION_ENABLED: ${HAPPYIMAGE_REGISTRATION_ENABLED:-true}
+      HAPPYIMAGE_REGISTRATION_ENABLED: ${HAPPYIMAGE_REGISTRATION_ENABLED:-false}
+      HAPPYIMAGE_TEST_ACCOUNTS_ENABLED: ${HAPPYIMAGE_TEST_ACCOUNTS_ENABLED:-false}
       HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START: ${HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START:-true}
       HAPPYIMAGE_THUMBNAIL_WIDTHS: ${HAPPYIMAGE_THUMBNAIL_WIDTHS:-640}
 
@@ -52,18 +55,3 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
-
-  happyimage-web:
-    image: ${HAPPYIMAGE_WEB_IMAGE:-happytoken/happyimage-web}:${HAPPYIMAGE_WEB_TAG:-latest}
-    container_name: happyimage-web
-    restart: unless-stopped
-    ports:
-      - "${HAPPYIMAGE_WEB_PORT:-3000}:80"
-    depends_on:
-      - happyimage-api
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s

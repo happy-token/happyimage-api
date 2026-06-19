@@ -149,7 +149,7 @@ class WebSessionService:
         parts = [
             f"{self.cookie_name}={token}",
             "HttpOnly",
-            "Path=/api/",
+            "Path=/",
         ]
         if config.api_base_url.startswith("https://"):
             parts.append("Secure")
@@ -166,7 +166,7 @@ class WebSessionService:
         parts = [
             f"{self.cookie_name}=",
             "HttpOnly",
-            "Path=/api/",
+            "Path=/",
             "Max-Age=0",
         ]
         frontend = config.frontend_base_url

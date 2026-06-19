@@ -4,12 +4,15 @@ import json
 import time
 import unittest
 
+import pytest
 import requests
 
 from utils.helper import save_images_from_text
 
 AUTH_KEY = "happyimage"
 BASE_URL = "http://localhost:8000"
+
+pytestmark = pytest.mark.live
 
 
 class ChatCompletionsTests(unittest.TestCase):

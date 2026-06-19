@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 
 from api import accounts, ai, auth_oidc, image_tasks, seed_gallery, share_drafts, system
 from api.errors import install_exception_handlers
-from api.support import resolve_web_asset, start_limited_account_watcher
+from api.support import reset_current_request, resolve_web_asset, set_current_request, start_limited_account_watcher
 from services.backup_service import backup_service
 from services.config import config
 from services.image_service import start_image_cleanup_scheduler
@@ -47,6 +47,22 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="HappyImage", version=app_version, lifespan=lifespan)
     install_exception_handlers(app)
+
+    @app.middleware("http")
+    async def add_security_headers(request, call_next):
+        request_token = set_current_request(request)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_current_request(request_token)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+        if proto == "https":
+            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
 
     # CORS: support credentials for configured frontend origins.
     # Wildcard origins when no specific frontend is configured.

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from pathlib import Path
 from threading import Event, Thread
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
@@ -11,6 +13,7 @@ from services.config import config
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST_DIR = BASE_DIR / "web_dist"
+_CURRENT_REQUEST: ContextVar[Request | None] = ContextVar("happyimage_current_request", default=None)
 
 
 def extract_bearer_token(authorization: str | None) -> str:
@@ -27,12 +30,53 @@ def _legacy_admin_identity(token: str) -> dict[str, object] | None:
     return None
 
 
+def set_current_request(request: Request):
+    return _CURRENT_REQUEST.set(request)
+
+
+def reset_current_request(token) -> None:
+    _CURRENT_REQUEST.reset(token)
+
+
+def current_request() -> Request | None:
+    return _CURRENT_REQUEST.get()
+
+
+def _origin_of(value: str) -> str:
+    parsed = urlsplit(value.strip())
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}".lower()
+
+
+def _trusted_cookie_origins(request: Request) -> set[str]:
+    request_origin = f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}".lower()
+    origins = {request_origin}
+    for value in [config.frontend_base_url, config.base_url, config.api_base_url, *config.cors_origins]:
+        origin = _origin_of(str(value or ""))
+        if origin:
+            origins.add(origin)
+    return origins
+
+
+def _assert_cookie_origin_allowed(request: Request) -> None:
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS"}:
+        return
+    origin = _origin_of(request.headers.get("origin", ""))
+    if not origin:
+        referer = _origin_of(request.headers.get("referer", ""))
+        origin = referer
+    if origin and origin not in _trusted_cookie_origins(request):
+        raise HTTPException(status_code=403, detail={"error": "请求来源无效，请刷新页面后重试"})
+
+
 def _resolve_cookie_identity(request: Request) -> dict[str, object] | None:
     """Try to resolve identity from a web session cookie."""
     from services.web_session_service import WebSessionError, web_session_service
     cookie_value = request.cookies.get(web_session_service.cookie_name, "")
     if not cookie_value:
         return None
+    _assert_cookie_origin_allowed(request)
     try:
         identity = web_session_service.resolve_identity(cookie_value)
     except WebSessionError:
@@ -41,6 +85,8 @@ def _resolve_cookie_identity(request: Request) -> dict[str, object] | None:
     # Verify the user still exists and is enabled
     user_id = str(identity.get("id") or "")
     user_item = auth_service.get_key(user_id)
+    if user_item is None and user_id == "admin" and identity.get("role") == "admin" and config.auth_key:
+        return {"id": "admin", "name": "管理员", "role": "admin"}
     if user_item is None or not bool(user_item.get("enabled", True)):
         return None
 
@@ -57,34 +103,28 @@ def resolve_identity_for_request(
     request: Request,
     authorization: str | None = None,
 ) -> dict[str, object]:
-    """Resolve identity from cookie (for /api/*) or Bearer token.
-
-    Cookie-based auth is only attempted for /api/* prefixed routes.
-    /v1/* routes must use Bearer tokens.
-    """
-    path = request.url.path
-
-    # For /v1/* routes: Bearer only, no cookie fallback
-    if path.startswith("/v1/"):
-        token = extract_bearer_token(authorization)
+    """Resolve identity from a signed web cookie or Bearer token."""
+    token = extract_bearer_token(authorization)
+    if token:
         identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
         if identity is None:
             raise HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})
         return identity
 
-    # For /api/* routes: try cookie first, then Bearer
     cookie_identity = _resolve_cookie_identity(request)
     if cookie_identity is not None:
         return cookie_identity
 
-    token = extract_bearer_token(authorization)
     identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
     if identity is None:
         raise HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})
     return identity
 
 
-def require_identity(authorization: str | None) -> dict[str, object]:
+def require_identity(authorization: str | None, request: Request | None = None) -> dict[str, object]:
+    active_request = request or current_request()
+    if active_request is not None:
+        return resolve_identity_for_request(active_request, authorization)
     token = extract_bearer_token(authorization)
     identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
     if identity is None:
@@ -96,8 +136,8 @@ def require_auth_key(authorization: str | None) -> None:
     require_identity(authorization)
 
 
-def require_admin(authorization: str | None) -> dict[str, object]:
-    identity = require_identity(authorization)
+def require_admin(authorization: str | None, request: Request | None = None) -> dict[str, object]:
+    identity = require_identity(authorization, request)
     if identity.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"error": "需要管理员权限才能执行这个操作"})
     return identity

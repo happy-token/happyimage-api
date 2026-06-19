@@ -28,10 +28,13 @@ class ImageEditsJsonApiTests(unittest.TestCase):
 
         self.handle_patcher = mock.patch.object(ai_module.openai_v1_image_edit, "handle", fake_handle)
         self.filter_patcher = mock.patch.object(ai_module, "filter_or_log", mock.AsyncMock())
+        self.identity_patcher = mock.patch.object(ai_module, "require_identity", return_value={"role": "admin"})
         self.handle_patcher.start()
         self.filter_patcher.start()
+        self.identity_patcher.start()
         self.addCleanup(self.handle_patcher.stop)
         self.addCleanup(self.filter_patcher.stop)
+        self.addCleanup(self.identity_patcher.stop)
 
         app = FastAPI()
         app.include_router(ai_module.create_router())

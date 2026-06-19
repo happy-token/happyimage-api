@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import os
+import secrets
+import time
 from urllib.parse import quote
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from api.support import require_admin, require_identity, resolve_image_base_url
+from api.support import require_admin, require_identity, resolve_image_base_url, resolve_identity_for_request
 from services.auth_service import auth_service
 from services.backup_service import BackupError, backup_service
 from services.config import config
+from services.image_access_service import IMAGE_ACCESS_TOKEN_PARAM, verify_image_access_token
 from services.image_service import (
     compress_images,
     delete_images,
@@ -27,6 +30,7 @@ from services.image_storage_service import ImageStorageError, image_storage_serv
 from services.image_tags_service import delete_tag, get_all_tags, set_tags
 from services.log_service import log_service
 from services.proxy_service import test_proxy
+from services.web_session_service import WebSessionError, web_session_service
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -45,6 +49,9 @@ class ImageDeleteRequest(BaseModel):
 
 class ImageDownloadRequest(BaseModel):
     paths: list[str]
+
+class ImageDownloadTokenRequest(BaseModel):
+    paths: list[str] = []
 
 class ImageTagsRequest(BaseModel):
     path: str
@@ -93,6 +100,17 @@ def _auth_identity_response(identity: dict[str, object], access_token: str, app_
     }
 
 
+def _auth_login_response(identity: dict[str, object], access_token: str, app_version: str) -> JSONResponse:
+    payload = _auth_identity_response(identity, access_token, app_version)
+    try:
+        _session_token, cookie = web_session_service.create_session(identity)
+    except WebSessionError:
+        return JSONResponse(content=payload)
+    response = JSONResponse(content=payload)
+    response.headers["Set-Cookie"] = cookie
+    return response
+
+
 def _configured_login_email() -> str:
     return str(
         os.getenv("HAPPYIMAGE_LOGIN_EMAIL")
@@ -108,7 +126,7 @@ def _configured_login_password() -> str:
 def _test_login_token(email: str, password: str) -> str:
     enabled = str(
         os.getenv("HAPPYIMAGE_TEST_ACCOUNTS_ENABLED")
-        or config.data.get("test_accounts_enabled", "true")
+        or config.data.get("test_accounts_enabled", "false")
     ).strip().lower()
     if enabled in {"0", "false", "no", "off"}:
         return ""
@@ -130,10 +148,64 @@ def _named_key_identity(email: str, password: str) -> dict[str, object] | None:
     return None
 
 
+_DOWNLOAD_TOKENS: dict[str, tuple[float, dict[str, object]]] = {}
+_DOWNLOAD_TOKEN_TTL_SECONDS = 120
+_AUTH_ATTEMPTS: dict[str, list[float]] = {}
+_AUTH_ATTEMPT_WINDOW_SECONDS = 600
+_AUTH_ATTEMPT_LIMIT = 8
+
+
+def _rate_limit_key(request: Request, scope: str, subject: str = "") -> str:
+    host = request.client.host if request.client else "unknown"
+    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+    ip = forwarded or host
+    return f"{scope}:{ip}:{subject.strip().lower()}"
+
+
+def _check_auth_rate_limit(request: Request, scope: str, subject: str = "") -> None:
+    now = time.time()
+    key = _rate_limit_key(request, scope, subject)
+    cutoff = now - _AUTH_ATTEMPT_WINDOW_SECONDS
+    attempts = [item for item in _AUTH_ATTEMPTS.get(key, []) if item >= cutoff]
+    if len(attempts) >= _AUTH_ATTEMPT_LIMIT:
+        raise HTTPException(status_code=429, detail={"error": "尝试次数过多，请稍后再试"})
+    attempts.append(now)
+    _AUTH_ATTEMPTS[key] = attempts
+
+
+def _create_download_token(identity: dict[str, object]) -> str:
+    now = time.time()
+    expired = [key for key, (expires_at, _) in _DOWNLOAD_TOKENS.items() if expires_at < now]
+    for key in expired:
+        _DOWNLOAD_TOKENS.pop(key, None)
+    token = secrets.token_urlsafe(24)
+    _DOWNLOAD_TOKENS[token] = (now + _DOWNLOAD_TOKEN_TTL_SECONDS, identity)
+    return token
+
+
+def _require_download_admin(
+    request: Request,
+    authorization: str | None,
+    download_token: str = "",
+) -> dict[str, object]:
+    token = download_token.strip()
+    if token:
+        item = _DOWNLOAD_TOKENS.get(token)
+        if item is None or item[0] < time.time():
+            _DOWNLOAD_TOKENS.pop(token, None)
+            raise HTTPException(status_code=401, detail={"error": "下载链接已失效，请重新点击下载"})
+        identity = item[1]
+    else:
+        identity = resolve_identity_for_request(request, authorization)
+    if identity.get("role") != "admin":
+        raise HTTPException(status_code=403, detail={"error": "需要管理员权限才能执行这个操作"})
+    return identity
+
+
 def _registration_enabled() -> bool:
     enabled = str(
         os.getenv("HAPPYIMAGE_REGISTRATION_ENABLED")
-        or config.data.get("registration_enabled", "true")
+        or config.data.get("registration_enabled", "false")
     ).strip().lower()
     return enabled not in {"0", "false", "no", "off"}
 
@@ -168,14 +240,15 @@ def create_router(app_version: str) -> APIRouter:
     async def login(authorization: str | None = Header(default=None)):
         identity = require_identity(authorization)
         token = str(authorization or "").partition(" ")[2].strip()
-        return _auth_identity_response(identity, token, app_version)
+        return _auth_login_response(identity, token, app_version)
 
     @router.post("/api/auth/login")
-    async def password_login(body: PasswordLoginRequest):
+    async def password_login(request: Request, body: PasswordLoginRequest):
         access_key = body.access_key.strip()
+        _check_auth_rate_limit(request, "access_key" if access_key else "password_login", access_key or body.email)
         if access_key:
             identity = require_identity(f"Bearer {access_key}")
-            return _auth_identity_response(identity, access_key, app_version)
+            return _auth_login_response(identity, access_key, app_version)
 
         email = body.email.strip()
         password = body.password.strip()
@@ -184,7 +257,7 @@ def create_router(app_version: str) -> APIRouter:
 
         named_key_identity = _named_key_identity(email, password)
         if named_key_identity:
-            return _auth_identity_response(named_key_identity, password, app_version)
+            return _auth_login_response(named_key_identity, password, app_version)
 
         expected_email = _configured_login_email()
         expected_password = _configured_login_password()
@@ -195,16 +268,17 @@ def create_router(app_version: str) -> APIRouter:
             if test_login_token:
                 try:
                     identity = require_identity(f"Bearer {test_login_token}")
-                    return _auth_identity_response(identity, test_login_token, app_version)
+                    return _auth_login_response(identity, test_login_token, app_version)
                 except HTTPException:
                     pass
             raise HTTPException(status_code=401, detail={"error": "账号或密码不正确"})
 
         identity = require_identity(f"Bearer {config.auth_key}")
-        return _auth_identity_response(identity, config.auth_key, app_version)
+        return _auth_login_response(identity, config.auth_key, app_version)
 
     @router.post("/api/auth/register")
-    async def register_user(body: RegisterRequest):
+    async def register_user(request: Request, body: RegisterRequest):
+        _check_auth_rate_limit(request, "register", body.name)
         if not _registration_enabled():
             raise HTTPException(status_code=403, detail={"error": "注册功能暂未开放"})
 
@@ -219,7 +293,7 @@ def create_router(app_version: str) -> APIRouter:
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-        return _auth_identity_response(identity, password, app_version)
+        return _auth_login_response(identity, password, app_version)
 
     @router.get("/version")
     async def get_version():
@@ -244,11 +318,13 @@ def create_router(app_version: str) -> APIRouter:
         return list_images(resolve_image_base_url(request), start_date=start_date.strip(), end_date=end_date.strip())
 
     @router.get("/images/{image_path:path}", include_in_schema=False)
-    async def get_image(image_path: str):
+    async def get_image(image_path: str, image_token: str = Query(default="", alias=IMAGE_ACCESS_TOKEN_PARAM)):
+        verify_image_access_token(image_path, image_token)
         return get_image_response(image_path)
 
     @router.get("/image-thumbnails/{image_path:path}", include_in_schema=False)
-    async def get_image_thumbnail(image_path: str):
+    async def get_image_thumbnail(image_path: str, image_token: str = Query(default="", alias=IMAGE_ACCESS_TOKEN_PARAM)):
+        verify_image_access_token(image_path, image_token)
         return get_thumbnail_response(image_path)
 
     @router.post("/api/images/delete")
@@ -266,9 +342,38 @@ def create_router(app_version: str) -> APIRouter:
             headers={"Content-Disposition": 'attachment; filename="images.zip"'},
         )
 
+    @router.post("/api/images/download-token")
+    async def create_image_download_token(body: ImageDownloadTokenRequest, authorization: str | None = Header(default=None)):
+        identity = require_admin(authorization)
+        if not body.paths:
+            raise HTTPException(status_code=400, detail={"error": "paths is required"})
+        return {"token": _create_download_token(identity), "expires_in": _DOWNLOAD_TOKEN_TTL_SECONDS}
+
+    @router.get("/api/images/download")
+    async def download_images_link_endpoint(
+        request: Request,
+        path: list[str] = Query(default=[]),
+        paths: list[str] = Query(default=[]),
+        download_token: str = Query(default=""),
+        authorization: str | None = Header(default=None),
+    ):
+        _require_download_admin(request, authorization, download_token)
+        selected_paths = path or paths
+        buf = download_images_zip(selected_paths)
+        return StreamingResponse(
+            buf,
+            media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="images.zip"'},
+        )
+
     @router.get("/api/images/download/{image_path:path}")
-    async def download_single_image_endpoint(image_path: str, authorization: str | None = Header(default=None)):
-        require_admin(authorization)
+    async def download_single_image_endpoint(
+        request: Request,
+        image_path: str,
+        download_token: str = Query(default=""),
+        authorization: str | None = Header(default=None),
+    ):
+        _require_download_admin(request, authorization, download_token)
         return get_image_download_response(image_path)
 
     @router.get("/api/logs")
@@ -416,17 +521,37 @@ def create_router(app_version: str) -> APIRouter:
         return await run_in_threadpool(delete_to_target, target_free_mb, dry_run)
 
     @router.get("/health", response_model=None)
-    async def health_dashboard(format: str = Query(default="html")):
+    async def health_dashboard(
+        format: str = Query(default="html"),
+        detailed: bool = Query(default=False),
+        authorization: str | None = Header(default=None),
+    ):
         from services.account_service import account_service as acct_svc
         stats = acct_svc.get_stats()
         storage = config.get_storage_backend()
         storage_health = storage.health_check()
         healthy = stats["active"] > 0 or stats["unlimited_quota_count"] > 0
 
-        stats_json = {
+        public_json = {
             "status": "ok" if healthy else "degraded",
             "healthy": healthy,
             "version": app_version,
+        }
+        if not detailed:
+            if format == "json":
+                return public_json
+            status_text = "正常" if healthy else "异常"
+            return HTMLResponse(
+                "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"UTF-8\">"
+                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                "<title>HappyImage Health</title></head><body>"
+                f"<h1>HappyImage Health</h1><p>{status_text}</p>"
+                f"<p>v{app_version}</p></body></html>"
+            )
+
+        require_admin(authorization)
+        stats_json = {
+            **public_json,
             "storage": {"backend": storage.get_backend_info(), "health": storage_health},
             "accounts": stats,
         }

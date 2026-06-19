@@ -142,6 +142,8 @@ def create_router() -> APIRouter:
         # Verify the user still exists and is enabled
         user_id = str(identity.get("id") or "")
         user_item = auth_service.get_key(user_id)
+        if user_item is None and user_id == "admin" and identity.get("role") == "admin" and config.auth_key:
+            user_item = {"id": "admin", "name": "管理员", "role": "admin", "enabled": True}
         if user_item is None:
             raise HTTPException(
                 status_code=401, detail={"error": "账号不存在"}

@@ -6,8 +6,10 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from services.config import DATA_DIR
+from services.image_access_service import append_image_access_token
 
 VALID_STATUSES = {"draft", "pending_review", "approved", "rejected"}
 REQUIRED_FIELDS = (
@@ -19,6 +21,7 @@ REQUIRED_FIELDS = (
     "share_prompt",
     "title",
 )
+LOCAL_IMAGE_PREFIX = "/images/"
 
 
 def _now_iso() -> str:
@@ -52,6 +55,59 @@ def _normalize_tags(value: object) -> list[str]:
     return [tag for tag in (_clean(item) for item in value) if tag]
 
 
+def _safe_image_path(value: object) -> str:
+    path = unquote(_clean(value)).replace("\\", "/").lstrip("/")
+    parts = [part for part in path.split("/") if part]
+    if not parts or any(part in {".", ".."} for part in parts):
+        return ""
+    return "/".join(parts)
+
+
+def _extract_local_image_path(image_url: object) -> str:
+    raw = _clean(image_url)
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    path = parsed.path if parsed.scheme or parsed.netloc else raw.split("?", 1)[0]
+    if not path.startswith(LOCAL_IMAGE_PREFIX):
+        return ""
+    return _safe_image_path(path[len(LOCAL_IMAGE_PREFIX) :])
+
+
+def _strip_query(value: object) -> str:
+    raw = _clean(value)
+    if not raw:
+        return ""
+    parsed = urlsplit(raw)
+    if parsed.scheme or parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    return raw.split("?", 1)[0]
+
+
+def _normalize_image_reference(payload: dict[str, Any], existing: dict[str, Any] | None) -> tuple[str, str]:
+    image_url = _clean(payload.get("image_url"))
+    image_path = _safe_image_path(payload.get("image_path")) or _extract_local_image_path(image_url)
+    if not image_url and image_path:
+        image_url = f"{LOCAL_IMAGE_PREFIX}{image_path}"
+    if not image_path and existing:
+        image_path = _safe_image_path(existing.get("image_path")) or _extract_local_image_path(existing.get("image_url"))
+    return _strip_query(image_url), image_path
+
+
+def _fresh_image_url(item: dict[str, Any]) -> str:
+    image_url = _clean(item.get("image_url"))
+    image_path = _safe_image_path(item.get("image_path")) or _extract_local_image_path(image_url)
+    if not image_path:
+        return image_url
+
+    parsed = urlsplit(image_url)
+    if parsed.scheme or parsed.netloc:
+        base_url = f"{parsed.scheme}://{parsed.netloc}{LOCAL_IMAGE_PREFIX}{image_path}"
+    else:
+        base_url = f"{LOCAL_IMAGE_PREFIX}{image_path}"
+    return append_image_access_token(base_url, image_path)
+
+
 class ShareDraftService:
     def __init__(self, path: Path):
         self.path = path
@@ -74,11 +130,13 @@ class ShareDraftService:
                 draft_id = _clean((existing or {}).get("id")) or uuid.uuid4().hex
 
             updated_at = _next_iso((existing or {}).get("updated_at"))
+            image_url, image_path = _normalize_image_reference(payload, existing)
             item = {
                 "id": draft_id,
                 "owner_id": owner,
                 "source": "user_gallery",
-                "image_url": _clean(payload.get("image_url")),
+                "image_url": image_url,
+                "image_path": image_path,
                 "conversation_id": _clean(payload.get("conversation_id")),
                 "turn_id": _clean(payload.get("turn_id")),
                 "image_id": image_id,
@@ -144,7 +202,8 @@ class ShareDraftService:
             "id": draft_id,
             "owner_id": owner,
             "source": "user_gallery",
-            "image_url": _clean(raw_item.get("image_url")),
+            "image_url": _strip_query(raw_item.get("image_url")),
+            "image_path": _safe_image_path(raw_item.get("image_path")) or _extract_local_image_path(raw_item.get("image_url")),
             "conversation_id": _clean(raw_item.get("conversation_id")),
             "turn_id": _clean(raw_item.get("turn_id")),
             "image_id": _clean(raw_item.get("image_id")),
@@ -181,7 +240,9 @@ def _normalize_status(value: object) -> str:
 
 
 def _public_item(item: dict[str, Any]) -> dict[str, Any]:
-    return dict(item)
+    public = dict(item)
+    public["image_url"] = _fresh_image_url(item)
+    return public
 
 
 share_draft_service = ShareDraftService(DATA_DIR / "share_drafts.json")

@@ -35,6 +35,7 @@ class ShareDraftRequest(BaseModel):
     id: str | None = Field(default=None, max_length=100)
     source: str = Field(default="user_gallery", min_length=1, max_length=50)
     image_url: str = Field(..., min_length=1, max_length=2048)
+    image_path: str | None = Field(default=None, max_length=512)
     conversation_id: str = Field(..., min_length=1, max_length=100)
     turn_id: str = Field(..., min_length=1, max_length=100)
     image_id: str = Field(..., min_length=1, max_length=100)

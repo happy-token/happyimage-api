@@ -11,13 +11,23 @@
 
 种子索引文件: `data/image-gallery-seed/records/evolink_cases.json`
 
+## 分类规则
+
+图库分类尽量保持简单稳定，避免被长 prompt 或标签中的局部词带偏：
+
+1. `PINNED_CATEGORY_ITEM_IDS` 中的精选图固定归到对应分类，并在分类内置顶。
+2. 标题明确是人像且不是广告、海报、产品、图表等用途时，归到 `portrait`。
+3. 其它图片默认按原始来源分类映射到展示分类，例如 `product` -> `product-photography`、`ecommerce` -> `ecommerce-main-image`。
+4. 只有原始分类为空、`external` 或 `portrait` 时，才允许用标题关键词做纠偏。
+5. 分类筛选只匹配最终展示分类，不再用 tags 或 category aliases 扩大结果。
+
 ## 分类展示顺序
 
-由 `DISPLAY_CATEGORY_ORDER` 列表控制（第 80 行）。Portrait 固定排在第一位，其余按此顺序排列：
+由 `DISPLAY_CATEGORY_ORDER` 列表控制。`portrait` 固定排在第一位，其余按此顺序排列。数量来自后端 `/api/seed-gallery/facets` 的实时分类统计，不等同于首页精选图数量。
 
 | 序号 | 分类 | 当前数量 |
 |:--|:--|:--|
-| 1 | `portrait` | 6 |
+| 1 | `portrait` | 以 facets 返回为准 |
 | 2 | `fashion-editorial` | 1296 |
 | 3 | `product-photography` | 266 |
 | 4 | `ecommerce-main-image` | 35 |
@@ -52,9 +62,9 @@ def _category_count_sort_key(category: str, count: int):
 
 其他未在 `DISPLAY_CATEGORY_ORDER` 中的分类（如 `sports-poster`、`movie-poster`、`travel-poster`）排在最后，按数量降序。
 
-## 精选图片（Portrait）
+## 首页精选图片（Portrait）
 
-Portrait 分类共 6 张固定图片，由 `PINNED_CATEGORY_ITEM_IDS` 控制顺序（第 69 行）：
+首页人像区固定展示的精选图由 `PINNED_CATEGORY_ITEM_IDS` 控制顺序。这个列表只控制首页精选和分类内置顶排序，不限制 `portrait` 分类本身的统计和筛选结果。
 
 ```
 PINNED_CATEGORY_ITEM_IDS = {
@@ -102,7 +112,7 @@ PINNED_CATEGORY_ITEM_IDS = {
 
 ### 移除图片
 
-从 `PINNED_CATEGORY_ITEM_IDS["portrait"]` 列表中删除对应 ID 即可。图片文件可保留，不会显示但会让该图片在对应 source 的分类中按普通排序出现。
+从 `PINNED_CATEGORY_ITEM_IDS["portrait"]` 列表中删除对应 ID 即可。图片文件可保留；它不会作为首页精选展示，但仍会按后端推导出的展示分类出现在图库中。
 
 ### 调整分类顺序
 
