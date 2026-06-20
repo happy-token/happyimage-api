@@ -25,6 +25,7 @@ from api.support import (
     sanitize_sub2api_servers,
 )
 from services.account_service import account_service
+from services.config import config
 from services.cpa_service import cpa_config, cpa_import_service, list_remote_files
 from services.oauth_login_service import OAuthLoginError, oauth_login_service
 from services.sub2api_service import (
@@ -39,7 +40,7 @@ from services.sub2api_service import (
 class UserKeyCreateRequest(BaseModel):
     name: str = ""
     key: str = ""
-    image_quota: int = Field(default=0, ge=0)
+    image_quota: int | None = Field(default=None, ge=0)
 
 
 class UserKeyUpdateRequest(BaseModel):
@@ -47,6 +48,7 @@ class UserKeyUpdateRequest(BaseModel):
     enabled: bool | None = None
     key: str | None = None
     image_quota: int | None = Field(default=None, ge=0)
+    watermark_unlocked: bool | None = None
 
 
 class AccountCreateRequest(BaseModel):
@@ -179,14 +181,14 @@ def create_router() -> APIRouter:
                     role="user",
                     name=body.name,
                     key=custom_key,
-                    image_quota=body.image_quota,
+                    image_quota=config.default_user_image_quota if body.image_quota is None else body.image_quota,
                 )
                 raw_key = custom_key
             else:
                 item, raw_key = auth_service.create_key(
                     role="user",
                     name=body.name,
-                    image_quota=body.image_quota,
+                    image_quota=config.default_user_image_quota if body.image_quota is None else body.image_quota,
                 )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
@@ -220,9 +222,14 @@ def create_router() -> APIRouter:
                 "enabled": body.enabled,
                 "key": body.key,
                 "image_quota": body.image_quota,
+                "watermark_unlocked": body.watermark_unlocked,
             }.items()
             if value is not None
         }
+        if before_item is not None and body.image_quota is not None:
+            before_quota = before_item.get("image_quota")
+            if isinstance(before_quota, int) and body.image_quota > before_quota:
+                updates["watermark_unlocked"] = True
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "还没有检测到改动，请修改后再保存"})
         try:

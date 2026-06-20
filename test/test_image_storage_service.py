@@ -72,12 +72,14 @@ class ImageStorageServiceTests(unittest.TestCase):
         return ImageStorageService(self.data_dir / "image_index.json")
 
     def test_local_mode_saves_to_local_directory(self):
-        stored = self.service().save(png_bytes(), "http://app.test")
+        stored = self.service().save(png_bytes(), "http://app.test", owner_id="owner-1")
 
         self.assertEqual(stored.storage, "local")
         self.assertTrue((self.images_dir / stored.rel).is_file())
         self.assertTrue(stored.url.startswith(f"http://app.test/images/{stored.rel}?"))
         self.assertIn("image_token=", stored.url)
+        items = self.service().list_items("http://app.test", owner_id="owner-1")
+        self.assertEqual(items[0]["owner_id"], "owner-1")
 
     def test_webdav_mode_uploads_without_local_file(self):
         self.settings.update({
@@ -107,6 +109,48 @@ class ImageStorageServiceTests(unittest.TestCase):
 
         self.assertEqual([item["rel"] for item in items], ["2026/05/07/sample.png"])
         self.assertEqual(items[0]["storage"], "local")
+
+    def test_list_items_filters_by_owner(self):
+        image = png_bytes()
+        service = self.service()
+        first = self.images_dir / "2026" / "05" / "07" / "owner-1.png"
+        second = self.images_dir / "2026" / "05" / "07" / "owner-2.png"
+        first.parent.mkdir(parents=True, exist_ok=True)
+        first.write_bytes(image)
+        second.write_bytes(image)
+        service._save_index({
+            "2026/05/07/owner-1.png": {
+                "rel": "2026/05/07/owner-1.png",
+                "path": "2026/05/07/owner-1.png",
+                "name": "owner-1.png",
+                "date": "2026-05-07",
+                "created_at": "2026-05-07 00:00:01",
+                "storage": "local",
+                "local": True,
+                "webdav": False,
+                "owner_id": "owner-1",
+            },
+            "2026/05/07/owner-2.png": {
+                "rel": "2026/05/07/owner-2.png",
+                "path": "2026/05/07/owner-2.png",
+                "name": "owner-2.png",
+                "date": "2026-05-07",
+                "created_at": "2026-05-07 00:00:02",
+                "storage": "local",
+                "local": True,
+                "webdav": False,
+                "owner_id": "owner-2",
+            },
+        })
+
+        owner_items = service.list_items("http://app.test", owner_id="owner-1")
+        all_items = service.list_items("http://app.test", owner_id="owner-1", include_all=True)
+
+        self.assertEqual([item["rel"] for item in owner_items], ["2026/05/07/owner-1.png"])
+        self.assertEqual(
+            [item["rel"] for item in all_items],
+            ["2026/05/07/owner-2.png", "2026/05/07/owner-1.png"],
+        )
 
     def test_both_mode_saves_to_local_and_webdav(self):
         self.settings.update({

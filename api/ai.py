@@ -110,6 +110,7 @@ def create_router() -> APIRouter:
         identity = require_identity(authorization)
         payload = body.model_dump(mode="python")
         payload["base_url"] = resolve_image_base_url(request)
+        payload["owner_id"] = str(identity.get("id") or "")
         call = LoggedCall(identity, "/v1/images/generations", body.model, "文生图", request_text=body.prompt)
         await filter_or_log(call, body.prompt)
         cost = _image_quota_cost(payload)
@@ -139,6 +140,7 @@ def create_router() -> APIRouter:
         await filter_or_log(call, prompt)
         payload["images"] = await read_image_sources(image_sources)
         payload["base_url"] = resolve_image_base_url(request)
+        payload["owner_id"] = str(identity.get("id") or "")
         cost = _image_quota_cost(payload)
         try:
             reserved = await run_in_threadpool(auth_service.reserve_image_quota, identity, cost)

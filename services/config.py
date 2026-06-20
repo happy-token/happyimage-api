@@ -47,6 +47,15 @@ DEFAULT_CHAT_COMPLETION_CACHE = {
     "drop_assistant_history": False,
 }
 
+DEFAULT_RECHARGE = {
+    "enabled": False,
+    "provider": "contact",
+    "newapi_base_url": "",
+    "newapi_console_topup_path": "/console/topup",
+    "webhook_secret": "",
+    "quota_per_unit": 1,
+}
+
 
 def _normalize_bool(value: object, default: bool = False) -> bool:
     if isinstance(value, str):
@@ -206,6 +215,56 @@ def _normalize_chat_completion_cache_settings(value: object) -> dict[str, object
             bool(DEFAULT_CHAT_COMPLETION_CACHE["drop_assistant_history"]),
         ),
     }
+
+
+def _normalize_recharge_settings(value: object) -> dict[str, object]:
+    source = value if isinstance(value, dict) else {}
+    provider = str(
+        _getenv("HAPPYIMAGE_RECHARGE_PROVIDER")
+        or source.get("provider")
+        or DEFAULT_RECHARGE["provider"]
+    ).strip().lower()
+    if provider not in {"contact", "newapi"}:
+        provider = "contact"
+    console_path = str(
+        _getenv("HAPPYIMAGE_NEWAPI_CONSOLE_TOPUP_PATH")
+        or source.get("newapi_console_topup_path")
+        or DEFAULT_RECHARGE["newapi_console_topup_path"]
+    ).strip()
+    if not console_path.startswith("/"):
+        console_path = f"/{console_path}"
+    return {
+        "enabled": _normalize_bool(
+            _getenv("HAPPYIMAGE_RECHARGE_ENABLED") or source.get("enabled"),
+            bool(DEFAULT_RECHARGE["enabled"]),
+        ),
+        "provider": provider,
+        "newapi_base_url": str(
+            _getenv("HAPPYIMAGE_NEWAPI_BASE_URL")
+            or source.get("newapi_base_url")
+            or ""
+        ).strip().rstrip("/"),
+        "newapi_console_topup_path": console_path,
+        "webhook_secret": str(
+            _getenv("HAPPYIMAGE_RECHARGE_WEBHOOK_SECRET")
+            or source.get("webhook_secret")
+            or ""
+        ).strip(),
+        "quota_per_unit": _normalize_positive_int(
+            _getenv("HAPPYIMAGE_RECHARGE_QUOTA_PER_UNIT")
+            if _getenv("HAPPYIMAGE_RECHARGE_QUOTA_PER_UNIT")
+            else source.get("quota_per_unit"),
+            int(DEFAULT_RECHARGE["quota_per_unit"]),
+            1,
+        ),
+    }
+
+
+def _redact_recharge_secret(settings: dict[str, object]) -> dict[str, object]:
+    redacted = dict(settings)
+    redacted["webhook_secret_configured"] = bool(str(redacted.get("webhook_secret") or "").strip())
+    redacted.pop("webhook_secret", None)
+    return redacted
 
 
 def _validate_image_storage_settings(settings: dict[str, object]) -> None:
@@ -508,6 +567,15 @@ class ConfigStore:
             return 86400
 
     @property
+    def default_user_image_quota(self) -> int:
+        return _normalize_positive_int(
+            _getenv("HAPPYIMAGE_DEFAULT_USER_IMAGE_QUOTA")
+            if _getenv("HAPPYIMAGE_DEFAULT_USER_IMAGE_QUOTA")
+            else self.data.get("default_user_image_quota", 20),
+            20,
+        )
+
+    @property
     def app_version(self) -> str:
         try:
             value = VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -537,11 +605,13 @@ class ConfigStore:
         data["cors_origins"] = self.cors_origins
         data["session_cookie_name"] = self.session_cookie_name
         data["session_max_age_seconds"] = self.session_max_age_seconds
+        data["default_user_image_quota"] = self.default_user_image_quota
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
         data["backup"] = self.get_backup_settings()
         data["image_storage"] = self.get_image_storage_settings()
         data["chat_completion_cache"] = self.get_chat_completion_cache_settings()
+        data["recharge"] = _redact_recharge_secret(self.get_recharge_settings())
         data.pop("auth-key", None)
         data.pop("session_secret", None)
         return data
@@ -561,6 +631,13 @@ class ConfigStore:
             next_data["chat_completion_cache"] = _normalize_chat_completion_cache_settings(
                 next_data.get("chat_completion_cache")
             )
+        if "recharge" in next_data:
+            incoming_recharge = next_data.get("recharge")
+            if isinstance(incoming_recharge, dict):
+                normalized = _normalize_recharge_settings(incoming_recharge)
+                if not str(normalized.get("webhook_secret") or "").strip():
+                    normalized["webhook_secret"] = self.get_recharge_settings().get("webhook_secret", "")
+                next_data["recharge"] = normalized
         if "oidc" in next_data:
             incoming_oidc = next_data.get("oidc")
             if isinstance(incoming_oidc, dict):
@@ -585,6 +662,9 @@ class ConfigStore:
 
     def get_oidc_settings(self) -> dict[str, object]:
         return _normalize_oidc_settings(self.data.get("oidc"))
+
+    def get_recharge_settings(self) -> dict[str, object]:
+        return _normalize_recharge_settings(self.data.get("recharge"))
 
     def get_storage_backend(self) -> StorageBackend:
         """获取存储后端实例（单例）"""

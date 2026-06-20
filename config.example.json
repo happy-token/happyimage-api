@@ -22,6 +22,7 @@
   "session_secret": "replace_with_a_different_strong_session_secret",
   "session_cookie_name": "happyimage_session",
   "session_max_age_seconds": 86400,
+  "default_user_image_quota": 20,
   "sensitive_words": [],
   "global_system_prompt": "",
   "ai_review": {
@@ -38,7 +39,15 @@
     "client_secret": "",
     "scopes": "openid profile email",
     "allowed_email_domains": "",
-    "default_image_quota": 0
+    "default_image_quota": 20
+  },
+  "recharge": {
+    "enabled": false,
+    "provider": "contact",
+    "newapi_base_url": "",
+    "newapi_console_topup_path": "/console/topup",
+    "webhook_secret": "",
+    "quota_per_unit": 1
   },
   "backup": {
     "enabled": false,

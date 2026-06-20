@@ -107,6 +107,35 @@ class ImageTaskServiceTests(unittest.TestCase):
             self.assertEqual(result["items"][0]["status"], "success")
             self.assertEqual(result["items"][0]["data"][0]["url"], "http://example.test/image.png")
 
+    def test_image_feedback_persists_and_can_be_changed(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "image_tasks.json"
+            service = self.make_service(path)
+            service.submit_generation(
+                OWNER,
+                client_task_id="feedback-task",
+                prompt="cat",
+                model="gpt-image-2",
+                size=None,
+                base_url="http://local.test",
+            )
+            wait_for_task(service, OWNER, "feedback-task", "success")
+
+            liked = service.set_image_feedback(OWNER, task_id="feedback-task", image_index=0, vote="like")
+            self.assertEqual(liked["data"][0]["feedback"]["vote"], "like")
+            self.assertEqual(liked["data"][0]["feedback"]["likes"], 1)
+
+            disliked = service.set_image_feedback(OWNER, task_id="feedback-task", image_index=0, vote="dislike")
+            self.assertEqual(disliked["data"][0]["feedback"]["vote"], "dislike")
+            self.assertEqual(disliked["data"][0]["feedback"]["dislikes"], 1)
+
+            reloaded = self.make_service(path)
+            result = reloaded.list_tasks(OWNER, ["feedback-task"])
+            self.assertEqual(result["items"][0]["data"][0]["feedback"]["vote"], "dislike")
+
+            cleared = reloaded.set_image_feedback(OWNER, task_id="feedback-task", image_index=0, vote=None)
+            self.assertNotIn("feedback", cleared["data"][0])
+
     def test_startup_marks_unfinished_tasks_as_error(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             path = Path(tmp_dir) / "image_tasks.json"

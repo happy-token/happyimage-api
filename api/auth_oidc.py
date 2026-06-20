@@ -7,7 +7,7 @@ They are separate from the OpenAI account OAuth import flow under
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
@@ -16,6 +16,7 @@ from services.auth_service import auth_service
 from services.config import config
 from services.oidc_service import OIDCError, oidc_service
 from services.web_session_service import web_session_service
+from api.support import resolve_identity_for_request
 
 
 class OIDCStartRequest(BaseModel):
@@ -86,7 +87,7 @@ def create_router() -> APIRouter:
 
         # Find or create the HappyImage user bound to this OIDC identity
         oidc_settings = config.get_oidc_settings()
-        default_quota = int(oidc_settings.get("default_image_quota", 0))
+        default_quota = int(oidc_settings.get("default_image_quota") or config.default_user_image_quota)
         try:
             user_item = await run_in_threadpool(
                 auth_service.find_or_create_oidc_user,
@@ -107,6 +108,8 @@ def create_router() -> APIRouter:
             "name": user_item.get("name", ""),
             "role": user_item.get("role", "user"),
             "image_quota": user_item.get("image_quota"),
+            "watermark_label": user_item.get("watermark_label") or "",
+            "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
         }
         _token, cookie = web_session_service.create_session(identity)
 
@@ -122,28 +125,25 @@ def create_router() -> APIRouter:
         return response
 
     @router.get("/api/auth/session")
-    async def get_session(request: Request):
-        """Return the current user session from the session cookie.
+    async def get_session(request: Request, authorization: str | None = Header(default=None)):
+        """Return the current user session from the session cookie or Bearer token.
 
         Returns 401 if no valid session is present.
         """
-        cookie_value = request.cookies.get(web_session_service.cookie_name, "")
-        if not cookie_value:
-            raise HTTPException(status_code=401, detail={"error": "未登录"})
-
-        from services.web_session_service import WebSessionError
-        try:
-            identity = web_session_service.resolve_identity(cookie_value)
-        except WebSessionError as exc:
-            raise HTTPException(
-                status_code=401, detail={"error": str(exc)}
-            ) from exc
+        identity = resolve_identity_for_request(request, authorization)
 
         # Verify the user still exists and is enabled
         user_id = str(identity.get("id") or "")
         user_item = auth_service.get_key(user_id)
         if user_item is None and user_id == "admin" and identity.get("role") == "admin" and config.auth_key:
-            user_item = {"id": "admin", "name": "管理员", "role": "admin", "enabled": True}
+            user_item = {
+                "id": "admin",
+                "name": "管理员",
+                "role": "admin",
+                "enabled": True,
+                "watermark_label": "",
+                "watermark_unlocked": True,
+            }
         if user_item is None:
             raise HTTPException(
                 status_code=401, detail={"error": "账号不存在"}
@@ -159,12 +159,25 @@ def create_router() -> APIRouter:
             "name": user_item.get("name", ""),
             "role": user_item.get("role", "user"),
             "image_quota": user_item.get("image_quota"),
+            "watermark_label": user_item.get("watermark_label") or "",
+            "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
         }
+        for key in ("auth_provider", "auth_subject", "email"):
+            value = str(user_item.get(key) or "").strip()
+            if value:
+                identity[key] = value
 
         role = "admin" if identity.get("role") == "admin" else "user"
         subject_id = str(identity.get("id") or "").strip() or role
         name = str(identity.get("name") or "").strip() or ("管理员" if role == "admin" else "创作者")
         image_quota = identity.get("image_quota") if role == "user" else None
+        watermark_label = str(identity.get("watermark_label") or "").strip()
+        watermark_unlocked = role == "admin" or bool(identity.get("watermark_unlocked", False))
+        external_identity = {
+            key: str(identity.get(key) or "").strip()
+            for key in ("auth_provider", "auth_subject", "email")
+            if str(identity.get(key) or "").strip()
+        }
 
         return {
             "ok": True,
@@ -172,11 +185,17 @@ def create_router() -> APIRouter:
             "subject_id": subject_id,
             "name": name,
             "image_quota": image_quota,
+            "watermark_label": watermark_label,
+            "watermark_unlocked": watermark_unlocked,
+            **external_identity,
             "user": {
                 "id": subject_id,
                 "name": name,
                 "role": role,
                 "image_quota": image_quota,
+                "watermark_label": watermark_label,
+                "watermark_unlocked": watermark_unlocked,
+                **external_identity,
             },
         }
 

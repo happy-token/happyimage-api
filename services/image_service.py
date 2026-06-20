@@ -150,7 +150,13 @@ def cleanup_image_thumbnails() -> int:
     _cleanup_empty_dirs(thumbnails_root)
     return removed
 
-def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict[str, object]:
+def list_images(
+    base_url: str,
+    start_date: str = "",
+    end_date: str = "",
+    owner_id: str = "",
+    include_all: bool = False,
+) -> dict[str, object]:
     config.cleanup_old_images()
     cleanup_image_thumbnails()
     all_tags = load_tags()
@@ -167,7 +173,13 @@ def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict
             "thumbnail_url": thumbnail_url(base_url, str(item["path"])),
             "tags": all_tags.get(str(item["path"]), []),
         }
-        for item in image_storage_service.list_items(base_url, start_date, end_date)
+        for item in image_storage_service.list_items(
+            base_url,
+            start_date,
+            end_date,
+            owner_id=owner_id,
+            include_all=include_all,
+        )
     ]
     groups: dict[str, list[dict[str, object]]] = {}
     for item in items:

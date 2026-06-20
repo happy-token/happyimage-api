@@ -58,7 +58,7 @@ class WebSessionService:
     def create_session_payload(self, identity: dict[str, object]) -> dict[str, Any]:
         """Build the data that goes into a signed session token."""
         now = int(time.time())
-        return {
+        payload = {
             "sub": str(identity.get("id") or ""),
             "name": str(identity.get("name") or ""),
             "role": str(identity.get("role") or "user"),
@@ -66,6 +66,11 @@ class WebSessionService:
             "iat": now,
             "exp": now + self.max_age,
         }
+        for key in ("auth_provider", "auth_subject", "email"):
+            value = str(identity.get(key) or "").strip()
+            if value:
+                payload[key] = value
+        return payload
 
     def sign_session(self, payload: dict[str, Any]) -> str:
         """Sign a session payload into a token string."""
@@ -138,6 +143,10 @@ class WebSessionService:
             quota = session_payload.get("image_quota")
             if quota is not None:
                 identity["image_quota"] = quota
+            for key in ("auth_provider", "auth_subject", "email"):
+                value = str(session_payload.get(key) or "").strip()
+                if value:
+                    identity[key] = value
         return identity
 
     # ------------------------------------------------------------------

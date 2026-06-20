@@ -62,6 +62,27 @@ def _collect_image_urls(data: list[Any]) -> list[str]:
     return urls
 
 
+def _normalize_feedback(value: object) -> str | None:
+    if value in ("like", "dislike"):
+        return str(value)
+    return None
+
+
+def _feedback_summary(feedback: object, image_index: int) -> dict[str, Any] | None:
+    if not isinstance(feedback, dict):
+        return None
+    item = feedback.get(str(image_index))
+    if not isinstance(item, dict):
+        return None
+    vote = _normalize_feedback(item.get("vote"))
+    return {
+        "vote": vote,
+        "likes": 1 if vote == "like" else 0,
+        "dislikes": 1 if vote == "dislike" else 0,
+        "updated_at": _clean(item.get("updated_at")),
+    }
+
+
 def _public_task(task: dict[str, Any]) -> dict[str, Any]:
     item = {
         "id": task.get("id"),
@@ -76,7 +97,21 @@ def _public_task(task: dict[str, Any]) -> dict[str, Any]:
     if task.get("conversation_id"):
         item["conversation_id"] = task.get("conversation_id")
     if task.get("data") is not None:
-        item["data"] = task.get("data")
+        data = task.get("data")
+        if isinstance(data, list):
+            public_data = []
+            for index, entry in enumerate(data):
+                if isinstance(entry, dict):
+                    public_entry = dict(entry)
+                    summary = _feedback_summary(task.get("feedback"), index)
+                    if summary:
+                        public_entry["feedback"] = summary
+                    public_data.append(public_entry)
+                else:
+                    public_data.append(entry)
+            item["data"] = public_data
+        else:
+            item["data"] = data
     if task.get("usage") is not None:
         item["usage"] = task.get("usage")
     if task.get("error"):
@@ -139,6 +174,7 @@ class ImageTaskService:
             "quality": quality,
             "response_format": "url",
             "base_url": base_url,
+            "owner_id": _owner_id(identity),
         }
         return self._submit(identity, client_task_id=client_task_id, mode="generate", payload=payload)
 
@@ -163,6 +199,7 @@ class ImageTaskService:
             "quality": quality,
             "response_format": "url",
             "base_url": base_url,
+            "owner_id": _owner_id(identity),
         }
         return self._submit(identity, client_task_id=client_task_id, mode="edit", payload=payload)
 
@@ -190,6 +227,52 @@ class ImageTaskService:
                 missing_ids = []
             return {"items": items, "missing_ids": missing_ids}
 
+    def set_image_feedback(
+        self,
+        identity: dict[str, object],
+        *,
+        task_id: str,
+        image_index: int,
+        vote: str | None,
+    ) -> dict[str, Any]:
+        owner = _owner_id(identity)
+        normalized_task_id = _clean(task_id)
+        if not normalized_task_id:
+            raise ValueError("task_id is required")
+        if image_index < 0:
+            raise ValueError("image_index is invalid")
+        normalized_vote = _normalize_feedback(vote)
+        if vote is not None and normalized_vote is None:
+            raise ValueError("vote is invalid")
+
+        key = _task_key(owner, normalized_task_id)
+        with self._lock:
+            task = self._tasks.get(key)
+            if task is None:
+                raise ValueError("task not found")
+            data = task.get("data")
+            if not isinstance(data, list) or image_index >= len(data):
+                raise ValueError("image not found")
+            feedback = task.get("feedback")
+            if not isinstance(feedback, dict):
+                feedback = {}
+            feedback_key = str(image_index)
+            if normalized_vote is None:
+                feedback.pop(feedback_key, None)
+            else:
+                feedback[feedback_key] = {
+                    "vote": normalized_vote,
+                    "updated_at": _now_iso(),
+                }
+            if feedback:
+                task["feedback"] = feedback
+            else:
+                task.pop("feedback", None)
+            task["updated_at"] = _now_iso()
+            task["updated_ts"] = time.time()
+            self._save_locked()
+            return _public_task(task)
+
     def _submit(
         self,
         identity: dict[str, object],
@@ -212,6 +295,7 @@ class ImageTaskService:
                 if cleaned:
                     self._save_locked()
                 return _public_task(task)
+            quota_reserved = False
             try:
                 quota_reserved = auth_service.reserve_image_quota(identity, 1)
             except ValueError as exc:
@@ -415,6 +499,21 @@ class ImageTaskService:
             error = _clean(item.get("error"))
             if error:
                 task["error"] = error
+            feedback = item.get("feedback")
+            if isinstance(feedback, dict):
+                normalized_feedback: dict[str, dict[str, str]] = {}
+                for index, feedback_item in feedback.items():
+                    if not isinstance(feedback_item, dict):
+                        continue
+                    vote = _normalize_feedback(feedback_item.get("vote"))
+                    if vote is None:
+                        continue
+                    normalized_feedback[_clean(index)] = {
+                        "vote": vote,
+                        "updated_at": _clean(feedback_item.get("updated_at")),
+                    }
+                if normalized_feedback:
+                    task["feedback"] = normalized_feedback
             tasks[_task_key(owner, task_id)] = task
         return tasks
 
@@ -472,6 +571,7 @@ class ImageTaskService:
                 raise ValueError("task has no conversation_id")
             mode = task.get("mode", "generate")
             model = task.get("model", "gpt-image-2")
+            quota_reserved = False
             try:
                 quota_reserved = auth_service.reserve_image_quota(identity, 1)
             except ValueError as exc:
@@ -536,6 +636,7 @@ class ImageTaskService:
                 "b64_json",
                 "",
                 int(time.time()),
+                owner_id=_owner_id(identity),
             )["data"]
             self._update_task(key, status=TASK_STATUS_SUCCESS, data=data, error="", duration_ms=int((time.time() - started) * 1000))
             self._log_call(

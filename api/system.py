@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import secrets
 import time
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -53,6 +53,10 @@ class ImageDownloadRequest(BaseModel):
 class ImageDownloadTokenRequest(BaseModel):
     paths: list[str] = []
 
+class ImageAccessLinkRequest(BaseModel):
+    path: str = ""
+    url: str = ""
+
 class ImageTagsRequest(BaseModel):
     path: str
     tags: list[str]
@@ -76,11 +80,22 @@ class RegisterRequest(BaseModel):
     confirm_password: str = ""
 
 
+class UserProfileUpdateRequest(BaseModel):
+    watermark_label: str | None = None
+
+
 def _auth_identity_response(identity: dict[str, object], access_token: str, app_version: str) -> dict[str, object]:
     role = "admin" if identity.get("role") == "admin" else "user"
     subject_id = str(identity.get("id") or "").strip() or role
     name = str(identity.get("name") or "").strip() or ("管理员" if role == "admin" else "创作者")
     image_quota = identity.get("image_quota") if role == "user" else None
+    watermark_label = str(identity.get("watermark_label") or "").strip()
+    watermark_unlocked = role == "admin" or bool(identity.get("watermark_unlocked", False))
+    external_identity = {
+        key: str(identity.get(key) or "").strip()
+        for key in ("auth_provider", "auth_subject", "email")
+        if str(identity.get(key) or "").strip()
+    }
     return {
         "ok": True,
         "version": app_version,
@@ -88,14 +103,20 @@ def _auth_identity_response(identity: dict[str, object], access_token: str, app_
         "subject_id": subject_id,
         "name": name,
         "image_quota": image_quota,
+        "watermark_label": watermark_label,
+        "watermark_unlocked": watermark_unlocked,
         "access_token": access_token,
         "token_type": "Bearer",
         "expires_in": None,
+        **external_identity,
         "user": {
             "id": subject_id,
             "name": name,
             "role": role,
             "image_quota": image_quota,
+            "watermark_label": watermark_label,
+            "watermark_unlocked": watermark_unlocked,
+            **external_identity,
         },
     }
 
@@ -130,9 +151,11 @@ def _test_login_token(email: str, password: str) -> str:
     ).strip().lower()
     if enabled in {"0", "false", "no", "off"}:
         return ""
-    if email == "admin" and password == "admin":
+    normalized_email = email.strip().lower()
+    normalized_password = password.strip().lower()
+    if normalized_email == "admin" and normalized_password == "admin":
         return "admin"
-    if email == "user" and password == "user":
+    if normalized_email == "user" and normalized_password == "user":
         return "user"
     return ""
 
@@ -200,6 +223,18 @@ def _require_download_admin(
     if identity.get("role") != "admin":
         raise HTTPException(status_code=403, detail={"error": "需要管理员权限才能执行这个操作"})
     return identity
+
+
+def _extract_image_access_path(body: ImageAccessLinkRequest) -> str:
+    raw = str(body.path or body.url or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail={"error": "path is required"})
+    without_query = raw.split("?", 1)[0]
+    parsed = urlsplit(raw)
+    path = parsed.path if parsed.scheme or parsed.netloc else without_query
+    if "/images/" in path:
+        path = path.split("/images/", 1)[1]
+    return unquote(path).strip().lstrip("/")
 
 
 def _registration_enabled() -> bool:
@@ -290,10 +325,40 @@ def create_router(app_version: str) -> APIRouter:
                 role="user",
                 name=name,
                 key=password,
+                image_quota=config.default_user_image_quota,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return _auth_login_response(identity, password, app_version)
+
+    @router.get("/api/auth/profile")
+    async def get_auth_profile(authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        return _auth_identity_response(identity, "", app_version)
+
+    @router.patch("/api/auth/profile")
+    async def update_auth_profile(body: UserProfileUpdateRequest, authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        if identity.get("role") == "admin":
+            return _auth_identity_response(identity, "", app_version)
+        user_id = str(identity.get("id") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=401, detail={"error": "用户身份无效，请重新登录"})
+        updates: dict[str, object] = {}
+        if body.watermark_label is not None:
+            watermark_label = body.watermark_label.strip()
+            if len(watermark_label) > 64:
+                raise HTTPException(status_code=400, detail={"error": "水印标签不能超过 64 个字符"})
+            updates["watermark_label"] = watermark_label
+        if not updates:
+            raise HTTPException(status_code=400, detail={"error": "还没有检测到改动"})
+        try:
+            item = await run_in_threadpool(auth_service.update_key, user_id, updates, role="user")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        if item is None:
+            raise HTTPException(status_code=404, detail={"error": "账号不存在"})
+        return _auth_identity_response(item, "", app_version)
 
     @router.get("/version")
     async def get_version():
@@ -314,17 +379,55 @@ def create_router(app_version: str) -> APIRouter:
 
     @router.get("/api/images")
     async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
-        require_admin(authorization)
-        return list_images(resolve_image_base_url(request), start_date=start_date.strip(), end_date=end_date.strip())
+        identity = require_identity(authorization)
+        include_all = identity.get("role") == "admin"
+        return list_images(
+            resolve_image_base_url(request),
+            start_date=start_date.strip(),
+            end_date=end_date.strip(),
+            owner_id=str(identity.get("id") or ""),
+            include_all=include_all,
+        )
+
+    @router.post("/api/images/access-link")
+    async def create_image_access_link(body: ImageAccessLinkRequest, request: Request, authorization: str | None = Header(default=None)):
+        identity = require_identity(authorization)
+        image_path = _extract_image_access_path(body)
+        include_all = identity.get("role") == "admin"
+        user_id = str(identity.get("id") or "")
+        image_items = image_storage_service.list_items(resolve_image_base_url(request), include_all=True)
+        for item in image_items:
+            if str(item.get("path") or item.get("rel") or "") == image_path:
+                owner_id = str(item.get("owner_id") or "").strip()
+                if owner_id and not include_all and owner_id != user_id:
+                    break
+                return {"url": item.get("url"), "path": image_path}
+        raise HTTPException(status_code=404, detail={"error": "图片不存在或无权访问"})
 
     @router.get("/images/{image_path:path}", include_in_schema=False)
-    async def get_image(image_path: str, image_token: str = Query(default="", alias=IMAGE_ACCESS_TOKEN_PARAM)):
-        verify_image_access_token(image_path, image_token)
+    async def get_image(
+        request: Request,
+        image_path: str,
+        image_token: str = Query(default="", alias=IMAGE_ACCESS_TOKEN_PARAM),
+        authorization: str | None = Header(default=None),
+    ):
+        if image_token:
+            verify_image_access_token(image_path, image_token)
+        else:
+            resolve_identity_for_request(request, authorization)
         return get_image_response(image_path)
 
     @router.get("/image-thumbnails/{image_path:path}", include_in_schema=False)
-    async def get_image_thumbnail(image_path: str, image_token: str = Query(default="", alias=IMAGE_ACCESS_TOKEN_PARAM)):
-        verify_image_access_token(image_path, image_token)
+    async def get_image_thumbnail(
+        request: Request,
+        image_path: str,
+        image_token: str = Query(default="", alias=IMAGE_ACCESS_TOKEN_PARAM),
+        authorization: str | None = Header(default=None),
+    ):
+        if image_token:
+            verify_image_access_token(image_path, image_token)
+        else:
+            resolve_identity_for_request(request, authorization)
         return get_thumbnail_response(image_path)
 
     @router.post("/api/images/delete")

@@ -61,6 +61,8 @@ class AuthService:
                 image_quota = max(0, int(image_quota))
             except (TypeError, ValueError):
                 image_quota = 0
+        watermark_label = self._clean(raw.get("watermark_label"))
+        watermark_unlocked = bool(raw.get("watermark_unlocked", False))
         email = self._clean(raw.get("email")) or None
         item: dict[str, object] = {
             "id": item_id,
@@ -69,6 +71,8 @@ class AuthService:
             "key_hash": key_hash,
             "enabled": bool(raw.get("enabled", True)),
             "image_quota": image_quota,
+            "watermark_label": watermark_label,
+            "watermark_unlocked": watermark_unlocked,
             "created_at": created_at,
             "last_used_at": last_used_at,
         }
@@ -103,6 +107,8 @@ class AuthService:
             "role": item.get("role"),
             "enabled": bool(item.get("enabled", True)),
             "image_quota": item.get("image_quota"),
+            "watermark_label": item.get("watermark_label") or "",
+            "watermark_unlocked": bool(item.get("watermark_unlocked", False)),
             "created_at": item.get("created_at"),
             "last_used_at": item.get("last_used_at"),
         }
@@ -207,6 +213,8 @@ class AuthService:
         role: AuthRole,
         name: str = "",
         image_quota: object = None,
+        watermark_label: str = "",
+        watermark_unlocked: bool = False,
     ) -> tuple[dict[str, object], str]:
         with self._lock:
             self._reload_locked()
@@ -226,6 +234,8 @@ class AuthService:
                 "key_hash": key_hash,
                 "enabled": True,
                 "image_quota": normalized_quota,
+                "watermark_label": self._clean(watermark_label),
+                "watermark_unlocked": bool(watermark_unlocked),
                 "created_at": _now_iso(),
                 "last_used_at": None,
             }
@@ -254,6 +264,8 @@ class AuthService:
         name: str = "",
         key: str = "",
         image_quota: object = None,
+        watermark_label: str = "",
+        watermark_unlocked: bool = False,
     ) -> dict[str, object]:
         with self._lock:
             self._reload_locked()
@@ -267,6 +279,8 @@ class AuthService:
                 "key_hash": key_hash,
                 "enabled": True,
                 "image_quota": normalized_quota,
+                "watermark_label": self._clean(watermark_label),
+                "watermark_unlocked": bool(watermark_unlocked),
                 "created_at": _now_iso(),
                 "last_used_at": None,
             }
@@ -324,6 +338,10 @@ class AuthService:
                             next_item["image_quota"] = max(0, int(quota))
                         except (TypeError, ValueError) as exc:
                             raise ValueError("图片额度必须是非负整数") from exc
+                if "watermark_label" in updates and updates.get("watermark_label") is not None:
+                    next_item["watermark_label"] = self._clean(updates.get("watermark_label"))[:64]
+                if "watermark_unlocked" in updates and updates.get("watermark_unlocked") is not None:
+                    next_item["watermark_unlocked"] = bool(updates.get("watermark_unlocked"))
                 if "key" in updates and updates.get("key") is not None:
                     next_item["key_hash"] = self._build_key_hash_locked(str(updates.get("key") or ""), exclude_id=normalized_id)
                 self._items[index] = next_item
@@ -587,6 +605,8 @@ class AuthService:
                 "key_hash": "",
                 "enabled": True,
                 "image_quota": default_image_quota,
+                "watermark_label": "",
+                "watermark_unlocked": False,
                 "auth_provider": normalized_provider,
                 "auth_subject": normalized_subject,
                 "created_at": _now_iso(),

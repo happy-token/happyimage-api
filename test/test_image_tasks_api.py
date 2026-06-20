@@ -4,7 +4,7 @@ import base64
 import unittest
 from unittest import mock
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import api.image_tasks as image_tasks_module
@@ -58,12 +58,32 @@ class FakeImageTaskService:
             "missing_ids": [task_id for task_id in ids if task_id == "missing"],
         }
 
+    def set_image_feedback(self, identity, **kwargs):
+        return {
+            "id": kwargs["task_id"],
+            "status": "success",
+            "mode": "generate",
+            "created_at": "2026-01-01 00:00:00",
+            "updated_at": "2026-01-01 00:00:00",
+            "data": [
+                {
+                    "url": "http://testserver/images/fake.png",
+                    "feedback": {
+                        "vote": kwargs["vote"],
+                        "likes": 1 if kwargs["vote"] == "like" else 0,
+                        "dislikes": 1 if kwargs["vote"] == "dislike" else 0,
+                    },
+                }
+            ],
+            "identity": identity,
+        }
+
 
 class ImageTasksApiTests(unittest.TestCase):
     def setUp(self):
         self.fake_service = FakeImageTaskService()
         self.service_patcher = mock.patch.object(image_tasks_module, "image_task_service", self.fake_service)
-        self.auth_patcher = mock.patch.object(image_tasks_module, "require_identity", side_effect=self.fake_require_identity)
+        self.auth_patcher = mock.patch.object(image_tasks_module, "require_identity", side_effect=self.fake_identity)
         self.service_patcher.start()
         self.auth_patcher.start()
         self.addCleanup(self.service_patcher.stop)
@@ -72,10 +92,10 @@ class ImageTasksApiTests(unittest.TestCase):
         app.include_router(image_tasks_module.create_router())
         self.client = TestClient(app)
 
-    def fake_require_identity(self, authorization: str | None):
+    def fake_identity(self, _request, authorization: str | None):
         if authorization == AUTH_HEADERS["Authorization"]:
             return {"id": "admin", "name": "管理员", "role": "admin"}
-        raise HTTPException(status_code=401, detail={"error": "unauthorized"})
+        raise image_tasks_module.HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})
 
     def test_create_generation_task(self):
         response = self.client.post(
@@ -89,6 +109,15 @@ class ImageTasksApiTests(unittest.TestCase):
         self.assertEqual(payload["id"], "task-1")
         self.assertEqual(payload["status"], "success")
         self.assertEqual(len(self.fake_service.generation_calls), 1)
+
+    def test_create_generation_task_requires_login(self):
+        response = self.client.post(
+            "/api/image-tasks/generations",
+            json={"client_task_id": "guest-task-1", "prompt": "cat", "model": "gpt-image-2"},
+        )
+
+        self.assertEqual(response.status_code, 401, response.text)
+        self.assertEqual(len(self.fake_service.generation_calls), 0)
 
     def test_create_edit_task_accepts_multiple_images(self):
         """测试图片编辑任务接口支持多个上传图片。"""
@@ -133,6 +162,26 @@ class ImageTasksApiTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual([item["id"] for item in payload["items"]], ["task-1"])
         self.assertEqual(payload["missing_ids"], ["missing"])
+
+    def test_update_image_feedback(self):
+        response = self.client.post(
+            "/api/image-tasks/task-1/feedback",
+            headers=AUTH_HEADERS,
+            json={"image_index": 0, "vote": "like"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["data"][0]["feedback"]["vote"], "like")
+        self.assertEqual(payload["data"][0]["feedback"]["likes"], 1)
+
+    def test_update_image_feedback_requires_login(self):
+        response = self.client.post(
+            "/api/image-tasks/task-1/feedback",
+            json={"image_index": 0, "vote": "like"},
+        )
+
+        self.assertEqual(response.status_code, 401, response.text)
 
 
 if __name__ == "__main__":

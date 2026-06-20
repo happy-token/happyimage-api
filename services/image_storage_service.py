@@ -204,7 +204,7 @@ class ImageStorageService:
         relative_dir = Path(time.strftime("%Y"), time.strftime("%m"), time.strftime("%d"))
         return f"{relative_dir.as_posix()}/{filename}"
 
-    def save(self, image_data: bytes, base_url: str | None = None) -> StoredImage:
+    def save(self, image_data: bytes, base_url: str | None = None, owner_id: str = "") -> StoredImage:
         config.cleanup_old_images()
         rel = self.make_relative_path(image_data)
         mode = self.mode()
@@ -237,6 +237,8 @@ class ImageStorageService:
             "webdav": stored_webdav,
             "remote_url": remote_url,
         }
+        if _clean(owner_id):
+            item["owner_id"] = _clean(owner_id)
         if dimensions:
             item["width"], item["height"] = dimensions
         with self._index_lock:
@@ -270,7 +272,15 @@ class ImageStorageService:
         safe_rel = _safe_relative_path(rel)
         return _is_image_rel(safe_rel) and _local_image_path(safe_rel).is_file()
 
-    def list_items(self, base_url: str, start_date: str = "", end_date: str = "") -> list[dict[str, object]]:
+    def list_items(
+        self,
+        base_url: str,
+        start_date: str = "",
+        end_date: str = "",
+        owner_id: str = "",
+        include_all: bool = False,
+    ) -> list[dict[str, object]]:
+        requested_owner = _clean(owner_id)
         with self._index_lock:
             indexed = self._load_clean_index()
             root = config.images_dir
@@ -325,6 +335,11 @@ class ImageStorageService:
                 if start_date and day < start_date:
                     continue
                 if end_date and day > end_date:
+                    continue
+                item_owner = _clean(item.get("owner_id"))
+                if not include_all and requested_owner and item_owner and item_owner != requested_owner:
+                    continue
+                if not include_all and requested_owner and not item_owner:
                     continue
                 items.append({
                     **item,

@@ -91,12 +91,19 @@ def _resolve_cookie_identity(request: Request) -> dict[str, object] | None:
         return None
 
     # Return fresh identity from storage
-    return {
+    fresh_identity = {
         "id": user_item.get("id", ""),
         "name": user_item.get("name", ""),
         "role": user_item.get("role", "user"),
         "image_quota": user_item.get("image_quota"),
+        "watermark_label": user_item.get("watermark_label") or "",
+        "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
     }
+    for key in ("auth_provider", "auth_subject", "email"):
+        value = str(user_item.get(key) or "").strip()
+        if value:
+            fresh_identity[key] = value
+    return fresh_identity
 
 
 def resolve_identity_for_request(
