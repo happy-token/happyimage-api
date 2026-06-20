@@ -6,6 +6,7 @@ import time
 import unittest
 from pathlib import Path
 
+from services.image_task_store import DatabaseImageTaskStore
 from services.image_task_service import ImageTaskService
 
 
@@ -172,6 +173,85 @@ class ImageTaskServiceTests(unittest.TestCase):
 
             self.assertEqual([item["status"] for item in result["items"]], ["error", "error"])
             self.assertTrue(all("已中断" in item.get("error", "") for item in result["items"]))
+
+    def test_success_task_persists_to_database_store(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_url = f"sqlite:///{Path(tmp_dir) / 'tasks.db'}"
+            path = Path(tmp_dir) / "image_tasks.json"
+            service = ImageTaskService(
+                path,
+                generation_handler=lambda _payload: {"data": [{"url": "http://example.test/image.png"}]},
+                edit_handler=lambda _payload: {"data": [{"url": "http://example.test/edit.png"}]},
+                retention_days_getter=lambda: 30,
+                task_store=DatabaseImageTaskStore(db_url),
+            )
+            service.submit_generation(
+                OWNER,
+                client_task_id="db-task",
+                prompt="cat",
+                model="gpt-image-2",
+                size=None,
+                base_url="http://local.test",
+            )
+            wait_for_task(service, OWNER, "db-task", "success")
+
+            reloaded = ImageTaskService(
+                path,
+                generation_handler=lambda _payload: {"data": [{"url": "unused"}]},
+                edit_handler=lambda _payload: {"data": [{"url": "unused"}]},
+                retention_days_getter=lambda: 30,
+                task_store=DatabaseImageTaskStore(db_url),
+            )
+            result = reloaded.list_tasks(OWNER, ["db-task"])
+
+            self.assertEqual(result["missing_ids"], [])
+            self.assertEqual(result["items"][0]["status"], "success")
+            self.assertEqual(result["items"][0]["data"][0]["url"], "http://example.test/image.png")
+
+    def test_database_store_imports_existing_json_tasks_when_empty(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "image_tasks.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "tasks": [
+                            {
+                                "id": "legacy-task",
+                                "owner_id": "owner-1",
+                                "status": "success",
+                                "mode": "generate",
+                                "model": "gpt-image-2",
+                                "created_at": "2099-01-01 00:00:00",
+                                "updated_at": "2099-01-01 00:00:00",
+                                "data": [{"url": "http://example.test/legacy.png"}],
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            db_url = f"sqlite:///{Path(tmp_dir) / 'tasks.db'}"
+
+            service = ImageTaskService(
+                path,
+                generation_handler=lambda _payload: {"data": [{"url": "unused"}]},
+                edit_handler=lambda _payload: {"data": [{"url": "unused"}]},
+                retention_days_getter=lambda: 30,
+                task_store=DatabaseImageTaskStore(db_url),
+            )
+            result = service.list_tasks(OWNER, ["legacy-task"])
+
+            self.assertEqual(result["missing_ids"], [])
+            self.assertEqual(result["items"][0]["data"][0]["url"], "http://example.test/legacy.png")
+
+            reloaded = ImageTaskService(
+                path,
+                generation_handler=lambda _payload: {"data": [{"url": "unused"}]},
+                edit_handler=lambda _payload: {"data": [{"url": "unused"}]},
+                retention_days_getter=lambda: 30,
+                task_store=DatabaseImageTaskStore(db_url),
+            )
+            self.assertEqual(reloaded.list_tasks(OWNER, ["legacy-task"])["missing_ids"], [])
 
 
 if __name__ == "__main__":

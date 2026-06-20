@@ -27,11 +27,22 @@ class OIDCStartResponse(BaseModel):
     authorize_url: str
 
 
+def _request_external_base_url(request: Request) -> str:
+    configured = config.api_base_url
+    if configured:
+        return configured
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0].strip()
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc)).split(",", 1)[0].strip()
+    if not host:
+        return ""
+    return f"{proto}://{host}".rstrip("/")
+
+
 def create_router() -> APIRouter:
     router = APIRouter()
 
     @router.post("/api/auth/oidc/start")
-    async def oidc_start(body: OIDCStartRequest):
+    async def oidc_start(body: OIDCStartRequest, request: Request):
         """Start OIDC login: return the provider authorize URL.
 
         The frontend calls this to get a URL, then navigates the user's
@@ -46,6 +57,7 @@ def create_router() -> APIRouter:
             result = await run_in_threadpool(
                 oidc_service.build_authorize_url,
                 next_path=body.next_path,
+                api_base_url=_request_external_base_url(request),
             )
         except OIDCError as exc:
             raise HTTPException(
@@ -111,6 +123,10 @@ def create_router() -> APIRouter:
             "watermark_label": user_item.get("watermark_label") or "",
             "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
         }
+        for key in ("auth_provider", "auth_subject", "email"):
+            value = str(user_item.get(key) or "").strip()
+            if value:
+                identity[key] = value
         _token, cookie = web_session_service.create_session(identity)
 
         # Redirect to frontend

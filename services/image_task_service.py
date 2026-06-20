@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 import time
 from collections.abc import Callable
@@ -11,6 +10,7 @@ from typing import Any
 from services.auth_service import auth_service
 from services.config import DATA_DIR, config
 from services.content_filter import request_text
+from services.image_task_store import ImageTaskStore, JSONImageTaskStore, create_image_task_store
 from services.log_service import LOG_TYPE_CALL, log_service
 from services.protocol import openai_v1_image_edit, openai_v1_image_generations
 
@@ -140,11 +140,14 @@ class ImageTaskService:
         generation_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_generations.handle,
         edit_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_edit.handle,
         retention_days_getter: Callable[[], int] | None = None,
+        task_store: ImageTaskStore | None = None,
     ):
         self.path = path
         self.generation_handler = generation_handler
         self.edit_handler = edit_handler
         self.retention_days_getter = retention_days_getter or (lambda: config.image_retention_days)
+        self.task_store = task_store or create_image_task_store(path)
+        self._migrated_from_json = False
         self._lock = threading.RLock()
         self._tasks: dict[str, dict[str, Any]] = {}
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +155,7 @@ class ImageTaskService:
             self._tasks = self._load_locked()
             changed = self._recover_unfinished_locked()
             changed = self._cleanup_locked() or changed
+            changed = self._migrated_from_json or changed
             if changed:
                 self._save_locked()
 
@@ -455,13 +459,10 @@ class ImageTaskService:
             self._save_locked()
 
     def _load_locked(self) -> dict[str, dict[str, Any]]:
-        if not self.path.exists():
-            return {}
-        try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-        raw_items = raw.get("tasks") if isinstance(raw, dict) else raw
+        raw_items = self.task_store.load_tasks()
+        if not raw_items and not isinstance(self.task_store, JSONImageTaskStore) and self.path.exists():
+            raw_items = JSONImageTaskStore(self.path).load_tasks()
+            self._migrated_from_json = bool(raw_items)
         if not isinstance(raw_items, list):
             return {}
         tasks: dict[str, dict[str, Any]] = {}
@@ -519,9 +520,7 @@ class ImageTaskService:
 
     def _save_locked(self) -> None:
         items = sorted(self._tasks.values(), key=lambda item: str(item.get("updated_at") or ""), reverse=True)
-        tmp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps({"tasks": items}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        tmp_path.replace(self.path)
+        self.task_store.save_tasks(items)
 
     def _recover_unfinished_locked(self) -> bool:
         changed = False
