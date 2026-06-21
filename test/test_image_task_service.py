@@ -110,6 +110,66 @@ class ImageTaskServiceTests(unittest.TestCase):
         assert "model gateway is not configured" in saved["error"]
         assert local_handler_called is False
 
+    def test_duplicate_client_task_id_returns_existing_task_without_second_gateway_call(self):
+        identity = {"id": "user-1", "role": "user", "image_quota": 10}
+        calls = 0
+
+        def handler(_payload):
+            nonlocal calls
+            calls += 1
+            return {"data": [{"url": "http://example.test/image.png"}]}
+
+        service = self.make_service(generation_handler=handler)
+
+        with patch("services.image_task_service.auth_service.reserve_image_quota", return_value=False):
+            first = service.submit_generation(
+                identity,
+                client_task_id="dupe-001",
+                prompt="first prompt",
+                model="gpt-image-2",
+                size=None,
+                quality="auto",
+            )
+            second = service.submit_generation(
+                identity,
+                client_task_id="dupe-001",
+                prompt="second prompt",
+                model="gpt-image-2",
+                size=None,
+                quality="auto",
+            )
+            wait_for_task(service, identity, "dupe-001", "success", timeout=3)
+
+        assert first["id"] == second["id"] == "dupe-001"
+        assert second["prompt"] == "first prompt"
+        assert calls == 1
+
+    def test_gateway_failure_is_persisted_as_restorable_error_task(self):
+        identity = {"id": "user-1", "role": "user", "image_quota": 10}
+
+        def handler(_payload):
+            raise RuntimeError("gateway quota exhausted")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "image_tasks.json"
+            service = self.make_service(path, generation_handler=handler)
+            with patch("services.image_task_service.auth_service.reserve_image_quota", return_value=False):
+                service.submit_generation(
+                    identity,
+                    client_task_id="gateway-error-001",
+                    prompt="a clean product photo",
+                    model="gpt-image-2",
+                    size=None,
+                    quality="auto",
+                )
+                wait_for_task(service, identity, "gateway-error-001", "error", timeout=3)
+
+            reloaded = self.make_service(path)
+            task = reloaded.list_tasks(identity, ["gateway-error-001"])["items"][0]
+            assert task["status"] == "error"
+            assert task["prompt"] == "a clean product photo"
+            assert "gateway quota exhausted" in task["error"]
+
     def test_duplicate_submit_uses_existing_task(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             calls = 0

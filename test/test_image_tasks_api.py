@@ -19,17 +19,24 @@ class FakeImageTaskService:
     def __init__(self):
         self.generation_calls = []
         self.edit_calls = []
+        self.tasks = {}
 
     def submit_generation(self, identity, **kwargs):
+        task_id = kwargs["client_task_id"]
+        if task_id in self.tasks:
+            return self.tasks[task_id]
         self.generation_calls.append((identity, kwargs))
-        return {
+        task = {
             "id": kwargs["client_task_id"],
             "status": "success",
             "mode": "generate",
+            "prompt": kwargs["prompt"],
             "created_at": "2026-01-01 00:00:00",
             "updated_at": "2026-01-01 00:00:00",
             "data": [{"url": f"{kwargs['base_url']}/images/fake.png"}],
         }
+        self.tasks[task_id] = task
+        return task
 
     def submit_edit(self, identity, **kwargs):
         self.edit_calls.append((identity, kwargs))
@@ -109,6 +116,27 @@ class ImageTasksApiTests(unittest.TestCase):
         self.assertEqual(payload["id"], "task-1")
         self.assertEqual(payload["status"], "success")
         self.assertEqual(len(self.fake_service.generation_calls), 1)
+
+    def test_generation_duplicate_client_task_id_returns_existing_task(self):
+        payload = {
+            "client_task_id": "api-dupe-001",
+            "prompt": "a clean product photo",
+            "model": "gpt-image-2",
+            "quality": "auto",
+        }
+
+        first = self.client.post("/api/image-tasks/generations", json=payload, headers=AUTH_HEADERS)
+        second = self.client.post(
+            "/api/image-tasks/generations",
+            json={**payload, "prompt": "different prompt"},
+            headers=AUTH_HEADERS,
+        )
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["id"] == second.json()["id"] == "api-dupe-001"
+        assert second.json()["prompt"] == "a clean product photo"
+        assert len(self.fake_service.generation_calls) == 1
 
     def test_create_generation_task_requires_login(self):
         response = self.client.post(
