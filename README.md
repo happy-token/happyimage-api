@@ -400,6 +400,22 @@ uv run pytest -q test/test_newapi_gateway_chain.py
 
 该测试会验证 NewAPI token 到 HappyImage Bearer key 的转发、核心 OpenAI-compatible 接口响应形状，以及 `/api/*` 不属于 NewAPI 通道。
 
+### End-to-end verification
+
+With `happyimage-api`, `happyimage-web`, and NewAPI running:
+
+```bash
+WEB_URL=http://127.0.0.1:3000 \
+API_URL=http://127.0.0.1:8000 \
+./scripts/verify-newapi-model-chain.sh
+```
+
+The script checks:
+
+- web `/v1/models` reaches the model gateway path
+- `/api/settings` redacts the model gateway token
+- `/api/image-tasks/generations` creates a restorable HappyImage task
+
 ## 常用运维命令
 
 ```bash
