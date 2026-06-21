@@ -1,20 +1,15 @@
 {
   "auth-key": "replace_with_a_strong_secret",
   "registration_enabled": false,
-  "test_accounts_enabled": false,
-  "refresh_account_interval_minute": 60,
   "image_retention_days": 15,
   "image_access_token_ttl_seconds": 86400,
   "image_poll_timeout_secs": 120,
-  "auto_remove_rate_limited_accounts": false,
-  "auto_remove_invalid_accounts": true,
   "log_levels": [
     "debug",
     "error",
     "info",
     "warning"
   ],
-  "proxy": "",
   "base_url": "",
   "frontend_base_url": "",
   "api_base_url": "",
@@ -63,16 +58,12 @@
     "passphrase": "",
     "include": {
       "config": true,
-      "cpa": true,
-      "sub2api": true,
       "logs": true,
       "image_tasks": true,
-      "accounts_snapshot": true,
       "auth_keys_snapshot": true,
       "images": false
     }
   },
-  "image_account_concurrency": 3,
   "image_parallel_generation": true,
   "image_poll_interval_secs": 10,
   "image_poll_initial_wait_secs": 10,

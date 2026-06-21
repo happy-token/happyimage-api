@@ -166,33 +166,21 @@ OIDC 回调地址格式：
 
 生产环境跨站登录通常需要 HTTPS，并正确配置 `HAPPYIMAGE_FRONTEND_BASE_URL`、`HAPPYIMAGE_API_BASE_URL` 和 `HAPPYIMAGE_CORS_ORIGINS`。更换 `HAPPYIMAGE_SESSION_SECRET` 会让所有浏览器会话退出登录。
 
-### 注册、代理和图库
+### 注册和图库
 
 | 变量 | 说明 | 默认值 |
 |:--|:--|:--|
 | `HAPPYIMAGE_REGISTRATION_ENABLED` | 是否开放普通用户注册 | `false` |
-| `HAPPYIMAGE_TEST_ACCOUNTS_ENABLED` | 是否启用本地测试账号 `admin/admin`、`user/user` | `false` |
-| `HAPPYIMAGE_PROXY` | 上游请求代理 URL | 空 |
 | `HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START` | 启动时预生成图库缩略图 | `true` |
 | `HAPPYIMAGE_THUMBNAIL_WIDTHS` | 缩略图宽度，逗号分隔 | `640` |
 | `image_access_token_ttl_seconds` | 用户生成图片签名访问链接有效期，配置于 `config.json` | `86400` |
-
-Docker 容器访问宿主机代理时可使用：
-
-```bash
-HAPPYIMAGE_PROXY=http://host.docker.internal:7897
-```
 
 ### 存储后端
 
 | 变量 | 说明 | 默认值 |
 |:--|:--|:--|
-| `STORAGE_BACKEND` | 可选 `json`、`sqlite`、`postgres`、`git` | `json` |
+| `STORAGE_BACKEND` | 可选 `json`、`sqlite`、`postgres` | `json` |
 | `DATABASE_URL` | SQLite / PostgreSQL 连接地址 | 空 |
-| `GIT_REPO_URL` | Git 存储仓库地址 | 空 |
-| `GIT_TOKEN` | Git 存储访问令牌 | 空 |
-| `GIT_BRANCH` | Git 分支 | `main` |
-| `GIT_FILE_PATH` | Git 仓库中的账号数据文件路径 | `accounts.json` |
 
 PostgreSQL 示例：
 
@@ -218,7 +206,7 @@ Docker 部署时，容器内 `/app/data` 会挂载到仓库目录下的 `./data`
 | `data/image_thumbnails/` | 用户生成图片的缩略图缓存 | 否，可重新生成 |
 | `data/image_index.json` | 本地图片索引和图片存储记录 | 否 |
 | `data/image_tasks.json`、`data/editable_file_tasks.json` | 图片 / PPT / PSD 任务状态 | 否 |
-| `data/accounts.json`、`data/auth_keys.json`、`data/accounts.db` | 号池账号、用户密钥或数据库文件 | 否，敏感 |
+| `data/auth_keys.json`、`data/accounts.db` | 用户密钥、用户数据或数据库文件 | 否，敏感 |
 | `data/logs.jsonl`、`data/share_drafts.json`、`data/image_tags.json` | 日志、分享草稿、图片标签 | 否，可能敏感 |
 | `data/image-gallery-seed/` | 内置官方图库种子数据 | 是，仓库已版本化 |
 
@@ -430,7 +418,7 @@ docker compose up -d --build
 curl -sf http://localhost:8000/health?format=json
 ```
 
-升级前建议备份 `config.json` 和 `data/`。生产主机、远程路径、账号、密钥、代理地址和第三方令牌请放在 `.env` 或服务器私有配置中，不要提交到 git。
+升级前建议备份 `config.json` 和 `data/`。生产主机、远程路径、密钥和第三方令牌请放在 `.env` 或服务器私有配置中，不要提交到 git。
 
 更多部署说明见 [Docker 部署指南](docs/docker-deployment.md)。
 
