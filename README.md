@@ -36,7 +36,7 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 | `config.example.json` | 应用配置模板 |
 | `.env.example` | Docker / 环境变量模板 |
 
-更多分层和维护约定见 [项目结构说明](docs/project-structure.md)。重大故障、根因和修复记录见 [技术日志](docs/technical-log.md)；开始新的排障 session 前建议先读该日志。
+技术架构图见 [Architecture](docs/architecture.md)。更多分层和维护约定见 [项目结构说明](docs/project-structure.md)。重大故障、根因和修复记录见 [技术日志](docs/technical-log.md)；开始新的排障 session 前建议先读该日志。
 
 ## 关联项目
 

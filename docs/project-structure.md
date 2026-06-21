@@ -50,6 +50,7 @@ Do not delete `.env`, `config.json`, or `data/*` during cleanup unless the opera
 | Document | Purpose |
 |:--|:--|
 | `README.md` | Main setup, configuration, NewAPI overview, operations commands. |
+| `docs/architecture.md` | Mermaid architecture diagrams for deployment, route split, image data flow, auth, and storage. |
 | `docs/newapi-gateway.md` | Authoritative NewAPI integration and HappyImage Web model-gateway chain. |
 | `docs/technical-log.md` | Bug history, root causes, fixes, and verification notes for future sessions. |
 | `docs/docker-deployment.md` | Docker deployment and server operations. |

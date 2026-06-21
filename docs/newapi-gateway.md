@@ -7,6 +7,8 @@ HappyImage can be used with NewAPI in two different directions. Keep these paths
 
 NewAPI is a model gateway, not the HappyImage application backend. Login, OIDC, history, user gallery, private image URLs, recharge state, settings, and logs must keep using HappyImage `/api/*` routes.
 
+For the visual architecture and data-flow diagrams, see [Architecture](architecture.md).
+
 ## Supported OpenAI-Compatible Surface
 
 These endpoints can be exposed to NewAPI or other OpenAI-compatible clients:
