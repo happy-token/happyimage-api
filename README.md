@@ -1,8 +1,8 @@
 <h1 align="center">HappyImage API</h1>
 
-<p align="center">OpenAI-compatible image API and self-hosted creation workspace backend.</p>
+<p align="center">Product-state API for HappyImage: auth, user data, image task history, private image storage, and OpenAI-compatible compatibility routes.</p>
 
-HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片生成 / 图片编辑接口、Chat Completions / Responses / Anthropic Messages 兼容入口、账号池管理、用户密钥、OIDC 登录、图库、日志、图片归档和备份能力。
+HappyImage API 是 HappyImage 的 FastAPI 产品后端，负责登录、用户、会话、图片任务历史、用户图库、私有图片访问、日志、设置、充值和兼容接口。模型账号池、上游调试和 GPT 逆向链路由 NewAPI 等外部模型网关管理；官方图库图片作为 Web 静态包维护，不再由 API 镜像承载。
 
 > [!WARNING]
 > 免责声明：
@@ -19,10 +19,31 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 - OpenAI 兼容接口：`/v1/models`、`/v1/images/generations`、`/v1/images/edits`、`/v1/chat/completions`、`/v1/responses`
 - Anthropic Messages 兼容入口：`/v1/messages`
 - 扩展任务接口：搜索、PPT / PSD 生成任务、图片任务轮询
-- Web 管理接口：账号池、用户密钥、额度、日志、设置、图片库、图库种子、分享草稿
+- Web 产品接口：登录、OIDC、用户密钥、额度、日志、设置、图片任务历史、用户图库、分享草稿
 - 认证：管理员访问密钥、用户 Bearer token、OIDC 单点登录、HttpOnly Cookie 会话
-- 存储：JSON、SQLite、PostgreSQL、Git 后端
+- 存储：JSON、SQLite、PostgreSQL
 - 部署：Docker / Docker Compose，镜像构建使用 China-friendly mirrors
+
+## 职责边界
+
+| 模块 | 负责 | 不负责 |
+|:--|:--|:--|
+| `happyimage-api`（本仓库） | 产品后端、认证会话、用户/额度、图片任务历史、用户图库、私有图片访问、设置、日志、充值、OpenAI-compatible 兼容入口 | 前端页面渲染、官方图库静态资源发布、NewAPI 账号池管理、GPT 逆向账号调试 |
+| `happyimage-web` | Next.js 前端、同源 middleware、用户工作台、官方图库静态包读取、`/v1/*` 到 NewAPI 的服务端代理 | 用户历史/私有图库持久化、API 数据库、模型账号池 |
+| `happyimage-gallery-source` | 官方图库源数据和候选池，供 Web 静态包导出 | 运行时服务、GitHub 版本化发布 |
+| NewAPI / 模型网关 | 模型渠道、账号池、上游调试、token、额度路由 | HappyImage 用户登录、历史会话、用户图库、私有图片 |
+
+推荐链路：
+
+```text
+Browser -> happyimage-web
+  /api/*, /images/*              -> happyimage-api
+  /seed-gallery/*                -> happyimage-web static assets
+  /v1/*                          -> NewAPI / OpenAI-compatible model gateway
+
+happyimage-api /api/image-tasks/* -> NewAPI /v1/images/*
+happyimage-api                    -> stores user, history, gallery, private image refs
+```
 
 ## 仓库结构
 
@@ -30,7 +51,6 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 |:--|:--|
 | `api/` | FastAPI 路由和请求解析 |
 | `services/` | 业务服务、协议适配、存储后端 |
-| `../happyimage-gallery-source/image-gallery-seed/` | 官方图库源数据，使用脚本导出为 web 静态包 |
 | `scripts/` | 迁移、测试、部署和容器启动脚本 |
 | `docs/` | 部署、功能状态和产品研究文档 |
 | `config.example.json` | 应用配置模板 |
@@ -42,11 +62,12 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 
 | 仓库 | 说明 |
 |:--|:--|
-| **happyimage-api**（本仓库） | FastAPI 后端：API、OIDC 回调、会话管理、号池管理 |
-| [happyimage-web](https://github.com/happy-token/happyimage-web) | 前端：Next.js Web 面板 |
+| **happyimage-api**（本仓库） | FastAPI 产品后端：API、OIDC 回调、会话、用户、历史、图库、设置 |
+| [happyimage-web](https://github.com/happy-token/happyimage-web) | Next.js 前端：页面、middleware、官方图库静态包、NewAPI 同源代理 |
+| `../happyimage-gallery-source`（本地/服务器目录） | 官方图库源数据和候选池，不提交 GitHub |
 | [HappyImage（旧 monorepo）](https://github.com/happy-token/HappyImage) | 旧合并仓库（存档） |
 
-当前 `docker-compose.yml` 启动的是 API 服务。前端可单独部署 `happyimage-web`，也可以在镜像或运行环境中提供前端静态产物；后端会在存在 Web assets 时尝试托管静态页面。
+当前 `docker-compose.yml` 启动的是 API 服务。前端单独由 `happyimage-web` 部署；官方图库静态包生成和发布也在 Web 项目侧处理。
 
 ## Docker 镜像
 
@@ -226,7 +247,7 @@ chmod 600 .env config.json
 docker compose up -d
 ```
 
-如果只想迁移图片历史，保留服务器已有配置，只复制 `data/images/`、`data/image_thumbnails/`、`data/image_index.json`、`data/image_tags.json`。如果使用 PostgreSQL / SQLite 存储用户数据，需要同时迁移对应数据库。官方图库请通过 `scripts/export_seed_gallery_static.py` 导出到 `happyimage-web/public/seed-gallery` 或部署时挂载到 web 容器。
+如果只想迁移图片历史，保留服务器已有配置，只复制 `data/images/`、`data/image_thumbnails/`、`data/image_index.json`、`data/image_tags.json`。如果使用 PostgreSQL / SQLite 存储用户数据，需要同时迁移对应数据库。官方图库请在 `happyimage-web` 中通过 `pnpm run gallery:build` 生成静态包，或部署时挂载到 Web 容器。
 
 > [!IMPORTANT]
 > `data/` 里可能包含 OpenAI access token、refresh token、用户访问密钥、账号邮箱、密码、代理或第三方服务凭据。它不是安全的公开数据目录；当前项目不默认对这些运行数据做静态加密。请把服务器磁盘、备份文件和 Git 存储仓库都当成敏感资产管理，不要提交到公开仓库，不要发给第三方排障。
@@ -285,9 +306,9 @@ Authorization: Bearer <HappyImage 用户 key 或 HAPPYIMAGE_AUTH_KEY>
 
 | 接口 | 原因 | 应该怎么调用 |
 |:--|:--|:--|
-| `/api/auth/*`、`/api/settings`、`/api/accounts/*` | Web 登录、OIDC、配置和账号池管理，不是模型协议 | happyimage-web 直连 HappyImage API |
+| `/api/auth/*`、`/api/settings`、`/api/accounts/*` | Web 登录、OIDC、配置和遗留账号管理入口，不是模型协议；NewAPI-first 部署应隐藏本地账号管理 | happyimage-web 直连 HappyImage API |
 | `/api/image-tasks/*`、`/api/images/*`、`/images/*`、`/image-thumbnails/*` | 用户图库、历史任务、私有图片签名链接和下载 | happyimage-web 直连 HappyImage API |
-| `/api/seed-gallery/*`、`/api/user-gallery/*`、`/api/share-drafts/*` | HappyImage 产品图库和分享草稿能力 | happyimage-web 直连 HappyImage API |
+| `/api/seed-gallery/*`、`/api/user-gallery/*`、`/api/share-drafts/*` | 用户图库和分享草稿属于产品接口；`/api/seed-gallery/*` 仅作为旧兼容 fallback，正式官方图库由 Web 静态包提供 | happyimage-web 直连 HappyImage API；官方图库优先读 `/seed-gallery/*` |
 | `/api/recharge/*` | 充值会话和 NewAPI 回调适配 | 浏览器 / NewAPI 回调直连 HappyImage API |
 | `POST /v1/messages` | Anthropic Messages 兼容入口，不是 OpenAI-compatible channel | 仅在 NewAPI 明确支持 Anthropic 转发时单独配置 |
 | `POST /v1/search` | HappyImage 扩展搜索入口 | 自定义客户端直连 HappyImage API |
@@ -378,7 +399,7 @@ pnpm dev
 
 其中 `MODEL_BACKEND_API_KEY` 只存在于 Next.js 服务端 middleware 环境中，用于代理 `/v1/*` 时替换为 NewAPI token，不会直接暴露给浏览器。
 
-如果 NewAPI 已经承担号池管理、调试和上游账号设置，前端加上 `NEXT_PUBLIC_EXTERNAL_MODEL_ADMIN=true`，HappyImage Web 会隐藏本地号池和调试入口，只保留用户、图库、日志、系统设置，以及 HappyImage API 的模型网关 Base URL / token 配置。
+如果 NewAPI 已经承担号池管理、调试和上游账号设置，前端加上 `NEXT_PUBLIC_EXTERNAL_MODEL_ADMIN=true`，HappyImage Web 会隐藏本地号池和调试入口，只保留用户、用户图库、日志、系统设置，以及 HappyImage API 的模型网关 Base URL / token 配置。
 
 本仓库内置了模拟 NewAPI 转发链路测试：
 
