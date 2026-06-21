@@ -357,8 +357,17 @@ class ImageTaskService:
         # 将进度回调添加到 payload 中（handler 会提取并传递给 ConversationRequest）
         payload_with_progress = {**payload, "progress_callback": progress_callback}
         try:
-            handler = self.edit_handler if mode == "edit" else self.generation_handler
-            result = handler(payload_with_progress)
+            from services import model_gateway_service
+
+            if model_gateway_service.is_enabled():
+                result = (
+                    model_gateway_service.edit_image(payload_with_progress)
+                    if mode == "edit"
+                    else model_gateway_service.generate_image(payload_with_progress)
+                )
+            else:
+                handler = self.edit_handler if mode == "edit" else self.generation_handler
+                result = handler(payload_with_progress)
             if not isinstance(result, dict):
                 raise RuntimeError("image task returned streaming result unexpectedly")
             data = result.get("data")

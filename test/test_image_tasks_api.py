@@ -92,7 +92,7 @@ class ImageTasksApiTests(unittest.TestCase):
         app.include_router(image_tasks_module.create_router())
         self.client = TestClient(app)
 
-    def fake_identity(self, _request, authorization: str | None):
+    def fake_identity(self, authorization: str | None, _request=None):
         if authorization == AUTH_HEADERS["Authorization"]:
             return {"id": "admin", "name": "管理员", "role": "admin"}
         raise image_tasks_module.HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})

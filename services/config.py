@@ -576,6 +576,22 @@ class ConfigStore:
         )
 
     @property
+    def model_gateway_base_url(self) -> str:
+        return str(
+            _getenv("HAPPYIMAGE_MODEL_GATEWAY_BASE_URL")
+            or self.data.get("model_gateway_base_url")
+            or ""
+        ).strip().rstrip("/")
+
+    @property
+    def model_gateway_api_key(self) -> str:
+        return str(
+            _getenv("HAPPYIMAGE_MODEL_GATEWAY_API_KEY")
+            or self.data.get("model_gateway_api_key")
+            or ""
+        ).strip()
+
+    @property
     def app_version(self) -> str:
         try:
             value = VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -606,6 +622,8 @@ class ConfigStore:
         data["session_cookie_name"] = self.session_cookie_name
         data["session_max_age_seconds"] = self.session_max_age_seconds
         data["default_user_image_quota"] = self.default_user_image_quota
+        data["model_gateway_base_url"] = self.model_gateway_base_url
+        data["model_gateway_api_key_configured"] = bool(self.model_gateway_api_key)
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
         data["backup"] = self.get_backup_settings()
@@ -614,6 +632,7 @@ class ConfigStore:
         data["recharge"] = _redact_recharge_secret(self.get_recharge_settings())
         data.pop("auth-key", None)
         data.pop("session_secret", None)
+        data.pop("model_gateway_api_key", None)
         return data
 
     def get_proxy_settings(self) -> str:
@@ -622,6 +641,11 @@ class ConfigStore:
     def update(self, data: dict[str, object]) -> dict[str, object]:
         next_data = dict(self.data)
         next_data.update(dict(data or {}))
+        if "model_gateway_base_url" in next_data:
+            next_data["model_gateway_base_url"] = str(next_data.get("model_gateway_base_url") or "").strip().rstrip("/")
+        if "model_gateway_api_key" in next_data:
+            next_gateway_key = str(next_data.get("model_gateway_api_key") or "").strip()
+            next_data["model_gateway_api_key"] = next_gateway_key or str(self.data.get("model_gateway_api_key") or "").strip()
         if "backup" in next_data:
             next_data["backup"] = _normalize_backup_settings(next_data.get("backup"))
         if "image_storage" in next_data:
@@ -647,6 +671,7 @@ class ConfigStore:
                 next_data["oidc"] = normalized
         next_data.pop("backup_state", None)
         next_data.pop("session_secret_configured", None)
+        next_data.pop("model_gateway_api_key_configured", None)
         self.data = next_data
         self._save()
         return self.get()

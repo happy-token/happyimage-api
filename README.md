@@ -138,6 +138,10 @@ uv run pytest -m live
 | `HAPPYIMAGE_FRONTEND_BASE_URL` | 前端公开地址，OIDC 登录后重定向目标 | 空 |
 | `HAPPYIMAGE_API_BASE_URL` | 后端公开地址，用于构造 OIDC 回调 URL | `HAPPYIMAGE_BASE_URL` |
 | `HAPPYIMAGE_CORS_ORIGINS` | 允许的跨域来源，逗号分隔 | `HAPPYIMAGE_FRONTEND_BASE_URL` |
+| `HAPPYIMAGE_MODEL_GATEWAY_BASE_URL` | 可选 OpenAI-compatible 模型网关地址，例如 NewAPI 的 `/v1` | 空 |
+| `HAPPYIMAGE_MODEL_GATEWAY_API_KEY` | 可选模型网关 API Key，例如 NewAPI token | 空 |
+
+`HAPPYIMAGE_MODEL_GATEWAY_*` 也可以在管理员系统设置中保存；如果 `.env` 或部署环境变量里已经配置，环境变量优先。设置页面中的 token 留空保存会保留原有 token，不会清空。
 
 ### 会话与 OIDC
 
@@ -323,6 +327,23 @@ DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happyimage
 
 `STORAGE_BACKEND=sqlite` 也可用于单机部署。数据库模式下，用户、密钥和图片任务历史会写入数据库；首次切换到数据库且 `image_tasks` 表为空时，会自动从旧的 `data/image_tasks.json` 导入图片任务历史。
 
+如果希望 happyimage-web 图片工作台继续使用 HappyImage 的 `/api/image-tasks/*` 保存历史和图库，但底层模型调用经过 NewAPI，在 HappyImage API 上配置：
+
+```bash
+HAPPYIMAGE_MODEL_GATEWAY_BASE_URL=http://localhost:3001/v1
+HAPPYIMAGE_MODEL_GATEWAY_API_KEY=sk-happyimagetest
+```
+
+这样调用链路会变成：
+
+```text
+happyimage-web /api/image-tasks/generations
+  -> HappyImage API 记录任务和图库历史
+  -> NewAPI /v1/images/generations
+  -> HappyImage API /v1/images/generations
+  -> 上游图片模型
+```
+
 ### NewAPI 渠道配置
 
 在 NewAPI 新建渠道：
@@ -356,6 +377,20 @@ curl https://<newapi-host>/v1/images/generations \
 | OpenAI-compatible 模型调用 | `https://<newapi-host>/v1` |
 
 也就是说，`/api/*`、`/images/*` 走 HappyImage API；`/v1/models`、`/v1/images/generations`、`/v1/images/edits`、`/v1/chat/completions`、`/v1/responses` 可以走 NewAPI。
+
+本地开发的 happyimage-web 可使用：
+
+```bash
+BACKEND_URL=http://127.0.0.1:8000 \
+MODEL_BACKEND_URL=http://127.0.0.1:3001 \
+MODEL_BACKEND_API_KEY=sk-happyimagetest \
+NEXT_PUBLIC_EXTERNAL_MODEL_ADMIN=true \
+pnpm dev
+```
+
+其中 `MODEL_BACKEND_API_KEY` 只存在于 Next.js 服务端 middleware 环境中，用于代理 `/v1/*` 时替换为 NewAPI token，不会直接暴露给浏览器。
+
+如果 NewAPI 已经承担号池管理、调试和上游账号设置，前端加上 `NEXT_PUBLIC_EXTERNAL_MODEL_ADMIN=true`，HappyImage Web 会隐藏本地号池和调试入口，只保留用户、图库、日志、系统设置，以及 HappyImage API 的模型网关 Base URL / token 配置。
 
 本仓库内置了模拟 NewAPI 转发链路测试：
 

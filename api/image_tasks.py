@@ -49,7 +49,7 @@ def create_router() -> APIRouter:
         ids: str = Query(default=""),
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(request, authorization)
+        identity = require_identity(authorization, request)
         return await run_in_threadpool(image_task_service.list_tasks, identity, _parse_task_ids(ids))
 
     @router.post("/api/image-tasks/generations")
@@ -58,7 +58,7 @@ def create_router() -> APIRouter:
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(request, authorization)
+        identity = require_identity(authorization, request)
         await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations", body.model, "文生图任务", request_text=body.prompt), body.prompt)
         try:
             return await run_in_threadpool(
@@ -79,7 +79,7 @@ def create_router() -> APIRouter:
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(request, authorization)
+        identity = require_identity(authorization, request)
         payload, image_sources = await parse_image_edit_request(request)
         client_task_id = str(payload.get("client_task_id") or "").strip()
         if not client_task_id:
@@ -110,7 +110,7 @@ def create_router() -> APIRouter:
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(request, authorization)
+        identity = require_identity(authorization, request)
         try:
             return await run_in_threadpool(
                 image_task_service.resume_poll,
@@ -128,7 +128,7 @@ def create_router() -> APIRouter:
         request: Request,
         authorization: str | None = Header(default=None),
     ):
-        identity = require_identity(request, authorization)
+        identity = require_identity(authorization, request)
         try:
             return await run_in_threadpool(
                 image_task_service.set_image_feedback,
