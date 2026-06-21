@@ -30,7 +30,7 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 |:--|:--|
 | `api/` | FastAPI 路由和请求解析 |
 | `services/` | 业务服务、协议适配、存储后端 |
-| `data/image-gallery-seed/` | 内置图库种子数据和缩略图 |
+| `data/image-gallery-seed/` | 官方图库源数据，使用脚本导出为 web 静态包 |
 | `scripts/` | 迁移、测试、部署和容器启动脚本 |
 | `docs/` | 部署、功能状态和产品研究文档 |
 | `config.example.json` | 应用配置模板 |
@@ -166,13 +166,11 @@ OIDC 回调地址格式：
 
 生产环境跨站登录通常需要 HTTPS，并正确配置 `HAPPYIMAGE_FRONTEND_BASE_URL`、`HAPPYIMAGE_API_BASE_URL` 和 `HAPPYIMAGE_CORS_ORIGINS`。更换 `HAPPYIMAGE_SESSION_SECRET` 会让所有浏览器会话退出登录。
 
-### 注册和图库
+### 注册
 
 | 变量 | 说明 | 默认值 |
 |:--|:--|:--|
 | `HAPPYIMAGE_REGISTRATION_ENABLED` | 是否开放普通用户注册 | `false` |
-| `HAPPYIMAGE_PREGENERATE_THUMBNAILS_ON_START` | 启动时预生成图库缩略图 | `true` |
-| `HAPPYIMAGE_THUMBNAIL_WIDTHS` | 缩略图宽度，逗号分隔 | `640` |
 | `image_access_token_ttl_seconds` | 用户生成图片签名访问链接有效期，配置于 `config.json` | `86400` |
 
 ### 存储后端
@@ -208,7 +206,7 @@ Docker 部署时，容器内 `/app/data` 会挂载到仓库目录下的 `./data`
 | `data/image_tasks.json`、`data/editable_file_tasks.json` | 图片 / PPT / PSD 任务状态 | 否 |
 | `data/auth_keys.json`、`data/accounts.db` | 用户密钥、用户数据或数据库文件 | 否，敏感 |
 | `data/logs.jsonl`、`data/share_drafts.json`、`data/image_tags.json` | 日志、分享草稿、图片标签 | 否，可能敏感 |
-| `data/image-gallery-seed/` | 内置官方图库种子数据 | 是，仓库已版本化 |
+| `data/image-gallery-seed/` | 官方图库源数据 | 不建议继续放大体积图片；生产使用 web 静态包 |
 
 迁移到服务器时，至少需要迁移：
 
@@ -228,7 +226,7 @@ chmod 600 .env config.json
 docker compose up -d
 ```
 
-如果只想迁移图片历史，保留服务器已有账号和配置，只复制 `data/images/`、`data/image_thumbnails/`、`data/image_index.json`、`data/image_tags.json`。如果使用 PostgreSQL / SQLite / Git 存储账号数据，需要同时迁移对应数据库或私有 Git 存储。
+如果只想迁移图片历史，保留服务器已有配置，只复制 `data/images/`、`data/image_thumbnails/`、`data/image_index.json`、`data/image_tags.json`。如果使用 PostgreSQL / SQLite 存储用户数据，需要同时迁移对应数据库。官方图库请通过 `scripts/export_seed_gallery_static.py` 导出到 `happyimage-web/public/seed-gallery` 或部署时挂载到 web 容器。
 
 > [!IMPORTANT]
 > `data/` 里可能包含 OpenAI access token、refresh token、用户访问密钥、账号邮箱、密码、代理或第三方服务凭据。它不是安全的公开数据目录；当前项目不默认对这些运行数据做静态加密。请把服务器磁盘、备份文件和 Git 存储仓库都当成敏感资产管理，不要提交到公开仓库，不要发给第三方排障。

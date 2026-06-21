@@ -57,7 +57,6 @@ COPY api ./api
 COPY services ./services
 COPY utils ./utils
 COPY scripts ./scripts
-COPY data/image-gallery-seed ./seed-data/image-gallery-seed
 RUN chmod +x /app/scripts/docker-entrypoint.sh
 
 EXPOSE 80

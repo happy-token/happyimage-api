@@ -14,7 +14,7 @@ HappyImage API is organized around FastAPI routes, business services, protocol a
 | `scripts/` | Operational scripts, migrations, one-off maintenance tools |
 | `test/` | Pytest test suite |
 | `docs/` | Deployment, architecture, feature, and product notes |
-| `data/image-gallery-seed/` | Versioned seed gallery data and thumbnails |
+| `data/image-gallery-seed/` | Official gallery source data for export scripts |
 
 ## Layering Guidelines
 
@@ -32,7 +32,7 @@ Shared helpers in `utils/` should avoid importing from `api/` or high-level serv
 
 Use `.env` for deployment-specific values such as secrets, public URLs, proxy settings, and storage credentials. Use `config.json` or the Web settings API for application settings that operators may change over time.
 
-Runtime data lives under `data/`, but only `data/image-gallery-seed/` is versioned. Generated logs, images, task state, databases, and local caches should remain untracked.
+Runtime data lives under `data/`. Generated logs, images, task state, databases, local caches, and exported official-gallery static packages should remain untracked.
 
 Generated caches and local work products should stay ignored and can be deleted when cleaning a workspace:
 

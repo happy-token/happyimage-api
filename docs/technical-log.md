@@ -159,3 +159,25 @@ Use this format:
 **Verification**
 - Web middleware unit tests cover both base URL forms.
 - `pnpm run test:unit`
+
+## 2026-06-21 - Official Gallery Should Not Inflate API Docker Image
+
+**Symptoms**
+- Official gallery images are public static assets, but API Docker copied `data/image-gallery-seed` into the image and initialized it into `/app/data`.
+- The seed gallery directory is large and should not be committed or bundled into default deployment artifacts as it grows.
+
+**Root Cause**
+- The first gallery implementation served records, images, and thumbnails from `/api/seed-gallery/*`.
+- That made API own both product state and public static gallery assets.
+
+**Fix**
+- `happyimage-web` now prefers a static gallery package at `public/seed-gallery/static/items.json`.
+- Static image URLs use `/seed-gallery/images/*` and `/seed-gallery/thumbnails/w640/*`.
+- If the static package is absent, web falls back to the existing `/api/seed-gallery/*` compatibility endpoints.
+- API Docker no longer copies `data/image-gallery-seed` or initializes seed gallery data on startup.
+- Added `scripts/export_seed_gallery_static.py` to export normalized gallery JSON and optionally copy assets.
+
+**Verification**
+- `uv run python scripts/export_seed_gallery_static.py --output ../happyimage-web/public/seed-gallery`
+- Exported 3427 items and rewrote image URLs to `/seed-gallery/*`.
+- Generated static files are ignored by git and were removed after verification to keep local fallback behavior unchanged.

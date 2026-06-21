@@ -131,7 +131,7 @@ flowchart TD
   TaskStore["Image task storage<br/>JSON or database"]
   ImageStore["Image storage<br/>local / WebDAV / both"]
   RuntimeData["data/* runtime files"]
-  SeedGallery["data/image-gallery-seed<br/>versioned seed gallery"]
+  SeedGallery["web public/seed-gallery<br/>external static package"]
 
   Config --> API["happyimage-api"]
   API --> AuthStore
@@ -140,7 +140,7 @@ flowchart TD
   AuthStore --> RuntimeData
   TaskStore --> RuntimeData
   ImageStore --> RuntimeData
-  API --> SeedGallery
+  Web --> SeedGallery
 ```
 
 Version-control boundary:
@@ -149,7 +149,7 @@ Version-control boundary:
 |:--|:--|
 | `.env`, `config.json` | Never commit; deployment-specific secrets and settings. |
 | `data/images`, `data/image_tasks.json`, `data/auth_keys.json`, `data/accounts.json`, logs | Never commit; runtime data and secrets. |
-| `data/image-gallery-seed` | Commit; official seed gallery data. |
+| `happyimage-web/public/seed-gallery/*` | Do not commit; generated or mounted official gallery static package. |
 | `.next`, `.open-next`, `out`, `.pytest_cache`, `__pycache__`, `.worktrees` | Generated or temporary; safe to delete. |
 
 ## Deployment Modes
