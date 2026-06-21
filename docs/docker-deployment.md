@@ -140,14 +140,14 @@ docker run -p 3000:3000 \
 
 ```bash
 uv run python scripts/pregenerate_seed_gallery_thumbnails.py \
-  --seed-dir ~/workspace/happyimage-gallery-source/image-gallery-seed \
-  --candidate-dir ~/workspace/happyimage-gallery-source/image-gallery-candidates \
+  --seed-dir ~/workspace/HappyImage/happyimage-gallery-source/image-gallery-seed \
+  --candidate-dir ~/workspace/HappyImage/happyimage-gallery-source/image-gallery-candidates \
   --widths 640 \
   --quiet
 
 uv run python scripts/export_seed_gallery_static.py \
-  --seed-dir ~/workspace/happyimage-gallery-source/image-gallery-seed \
-  --candidate-dir ~/workspace/happyimage-gallery-source/image-gallery-candidates \
+  --seed-dir ~/workspace/HappyImage/happyimage-gallery-source/image-gallery-seed \
+  --candidate-dir ~/workspace/HappyImage/happyimage-gallery-source/image-gallery-candidates \
   --output /srv/happyimage/seed-gallery \
   --copy-assets
 ```
