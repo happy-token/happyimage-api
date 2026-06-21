@@ -94,6 +94,8 @@ def _public_task(task: dict[str, Any]) -> dict[str, Any]:
         "created_at": task.get("created_at"),
         "updated_at": task.get("updated_at"),
     }
+    if task.get("prompt"):
+        item["prompt"] = task.get("prompt")
     if task.get("conversation_id"):
         item["conversation_id"] = task.get("conversation_id")
     if task.get("data") is not None:
@@ -309,6 +311,7 @@ class ImageTaskService:
                 "owner_id": owner,
                 "status": TASK_STATUS_QUEUED,
                 "mode": mode,
+                "prompt": _clean(payload.get("prompt")),
                 "model": _clean(payload.get("model"), "gpt-image-2"),
                 "size": _clean(payload.get("size")),
                 "quality": _clean(payload.get("quality"), "auto"),
@@ -327,6 +330,7 @@ class ImageTaskService:
                 self._tasks.pop(key, None)
                 raise
             should_start = True
+            public_task = _public_task(task)
 
         if should_start:
             thread = threading.Thread(
@@ -336,7 +340,7 @@ class ImageTaskService:
                 daemon=True,
             )
             thread.start()
-        return _public_task(task)
+        return public_task
 
     def _run_task(
         self,

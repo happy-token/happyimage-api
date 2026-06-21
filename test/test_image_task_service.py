@@ -27,13 +27,57 @@ def wait_for_task(service: ImageTaskService, identity: dict[str, object], task_i
 
 
 class ImageTaskServiceTests(unittest.TestCase):
-    def make_service(self, path: Path, handler=None) -> ImageTaskService:
+    def make_service(
+        self,
+        path: Path | None = None,
+        handler=None,
+        generation_handler=None,
+        edit_handler=None,
+    ) -> ImageTaskService:
+        if path is None:
+            tmp_dir = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+            self.addCleanup(tmp_dir.cleanup)
+            path = Path(tmp_dir.name) / "image_tasks.json"
         return ImageTaskService(
             path,
-            generation_handler=handler or (lambda _payload: {"data": [{"url": "http://example.test/image.png"}]}),
-            edit_handler=handler or (lambda _payload: {"data": [{"url": "http://example.test/edit.png"}]}),
+            generation_handler=generation_handler
+            or handler
+            or (lambda _payload: {"data": [{"url": "http://example.test/image.png"}]}),
+            edit_handler=edit_handler
+            or handler
+            or (lambda _payload: {"data": [{"url": "http://example.test/edit.png"}]}),
             retention_days_getter=lambda: 30,
         )
+
+    def test_submit_generation_returns_prompt_and_client_task_metadata(self):
+        identity = {"id": "user-1", "role": "admin", "image_quota": 10}
+
+        def handler(_payload):
+            time.sleep(0.05)
+            return {
+                "data": [{"url": "http://example.test/image.png"}],
+                "usage": {"total_tokens": 1},
+            }
+
+        service = self.make_service(generation_handler=handler)
+
+        task = service.submit_generation(
+            identity,
+            client_task_id="client-001",
+            prompt="a clean product photo",
+            model="gpt-image-2",
+            size="1024x1024",
+            quality="auto",
+            base_url="http://api.test",
+        )
+
+        assert task["id"] == "client-001"
+        assert task["status"] == "queued"
+        assert task["mode"] == "generate"
+        assert task["prompt"] == "a clean product photo"
+        assert task["model"] == "gpt-image-2"
+        assert task["size"] == "1024x1024"
+        assert task["quality"] == "auto"
 
     def test_duplicate_submit_uses_existing_task(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
