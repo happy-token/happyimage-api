@@ -407,8 +407,11 @@ With `happyimage-api`, `happyimage-web`, and NewAPI running:
 ```bash
 WEB_URL=http://127.0.0.1:3000 \
 API_URL=http://127.0.0.1:8000 \
+HAPPYIMAGE_AUTH_KEY=<same key configured for the running happyimage-api> \
 ./scripts/verify-newapi-model-chain.sh
 ```
+
+If `HAPPYIMAGE_AUTH_KEY` is omitted, the script falls back to `config.json`; that only works when this is the same config file used by the running `happyimage-api` service.
 
 The script checks:
 
