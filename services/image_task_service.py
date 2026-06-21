@@ -363,6 +363,7 @@ class ImageTaskService:
         try:
             from services import model_gateway_service
 
+            model_gateway_service.ensure_available()
             if model_gateway_service.is_enabled():
                 result = (
                     model_gateway_service.edit_image(payload_with_progress)

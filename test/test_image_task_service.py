@@ -5,6 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from services.image_task_store import DatabaseImageTaskStore
 from services.image_task_service import ImageTaskService
@@ -78,6 +79,36 @@ class ImageTaskServiceTests(unittest.TestCase):
         assert task["model"] == "gpt-image-2"
         assert task["size"] == "1024x1024"
         assert task["quality"] == "auto"
+
+    def test_required_gateway_missing_marks_task_error_without_local_fallback(self):
+        identity = {"id": "user-1", "role": "user", "image_quota": 10}
+        local_handler_called = False
+
+        def local_handler(_payload):
+            nonlocal local_handler_called
+            local_handler_called = True
+            return {"data": [{"url": "http://local.test/image.png"}]}
+
+        service = self.make_service(generation_handler=local_handler)
+
+        with patch("services.image_task_service.auth_service.reserve_image_quota", return_value=False), \
+             patch("services.model_gateway_service.is_required", return_value=True), \
+             patch("services.model_gateway_service.is_enabled", return_value=False):
+            task = service.submit_generation(
+                identity,
+                client_task_id="missing-gateway",
+                prompt="a clean product photo",
+                model="gpt-image-2",
+                size=None,
+                quality="auto",
+            )
+            wait_for_task(service, identity, "missing-gateway", "error", timeout=3)
+
+        saved = service.list_tasks(identity, ["missing-gateway"])["items"][0]
+        assert task["status"] == "queued"
+        assert saved["status"] == "error"
+        assert "model gateway is not configured" in saved["error"]
+        assert local_handler_called is False
 
     def test_duplicate_submit_uses_existing_task(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

@@ -5,12 +5,25 @@ from typing import Any
 from services.config import config
 
 
+class ModelGatewayConfigurationError(RuntimeError):
+    pass
+
+
 def _clean(value: object) -> str:
     return str(value or "").strip()
 
 
+def is_required() -> bool:
+    return bool(config.require_model_gateway)
+
+
 def is_enabled() -> bool:
     return bool(config.model_gateway_base_url and config.model_gateway_api_key)
+
+
+def ensure_available() -> None:
+    if is_required() and not is_enabled():
+        raise ModelGatewayConfigurationError("model gateway is not configured")
 
 
 def _request_json(path: str, payload: dict[str, Any]) -> dict[str, Any]:

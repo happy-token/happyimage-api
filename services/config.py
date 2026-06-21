@@ -592,6 +592,15 @@ class ConfigStore:
         ).strip()
 
     @property
+    def require_model_gateway(self) -> bool:
+        value = (
+            _getenv("HAPPYIMAGE_REQUIRE_MODEL_GATEWAY")
+            or self.data.get("require_model_gateway")
+            or False
+        )
+        return _normalize_bool(value, False)
+
+    @property
     def app_version(self) -> str:
         try:
             value = VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -624,6 +633,7 @@ class ConfigStore:
         data["default_user_image_quota"] = self.default_user_image_quota
         data["model_gateway_base_url"] = self.model_gateway_base_url
         data["model_gateway_api_key_configured"] = bool(self.model_gateway_api_key)
+        data["require_model_gateway"] = self.require_model_gateway
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
         data["backup"] = self.get_backup_settings()

@@ -103,6 +103,29 @@ class ConfigLoadingTests(unittest.TestCase):
                 else:
                     module.os.environ["HAPPYIMAGE_MODEL_GATEWAY_API_KEY"] = old_api_key
 
+    def test_require_model_gateway_uses_env_or_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps({"auth-key": "test-auth", "require_model_gateway": True}),
+                encoding="utf-8",
+            )
+
+            module = self.config_module
+            old_env = module.os.environ.get("HAPPYIMAGE_REQUIRE_MODEL_GATEWAY")
+            try:
+                module.os.environ.pop("HAPPYIMAGE_REQUIRE_MODEL_GATEWAY", None)
+                store = module.ConfigStore(config_path)
+                self.assertTrue(store.require_model_gateway)
+
+                module.os.environ["HAPPYIMAGE_REQUIRE_MODEL_GATEWAY"] = "false"
+                self.assertFalse(store.require_model_gateway)
+            finally:
+                if old_env is None:
+                    module.os.environ.pop("HAPPYIMAGE_REQUIRE_MODEL_GATEWAY", None)
+                else:
+                    module.os.environ["HAPPYIMAGE_REQUIRE_MODEL_GATEWAY"] = old_env
+
 
 if __name__ == "__main__":
     unittest.main()
