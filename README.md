@@ -267,6 +267,104 @@ curl http://localhost:8000/v1/models \
 
 Web 管理接口位于 `/api/*`，支持 Cookie 会话或 Bearer token。`/v1/*` 路由面向外部 API 客户端，建议始终使用 Bearer token。
 
+## NewAPI 网关兼容性
+
+HappyImage 可以作为 NewAPI 的 OpenAI-compatible 上游注册，但不是所有 Web 请求都应该经过 NewAPI。NewAPI 只适合代理模型调用；HappyImage Web 应用态接口仍应直连 HappyImage API。
+
+### NewAPI 可代理接口
+
+在 NewAPI 中按 OpenAI-compatible / 自定义 OpenAI API 渠道接入时，建议只启用以下接口：
+
+| HappyImage 接口 | NewAPI 兼容性 | 作用 |
+|:--|:--|:--|
+| `GET /v1/models` | ✅ OpenAI-compatible | 返回 NewAPI 可同步的模型列表，例如 `gpt-image-2`、`auto` |
+| `POST /v1/images/generations` | ✅ OpenAI-compatible | 文生图，支持 `prompt`、`model`、`n`、`size`、`quality`、`response_format` |
+| `POST /v1/images/edits` | ✅ OpenAI-compatible | 图生图 / 图片编辑，支持 multipart 上传，也支持 JSON data URL |
+| `POST /v1/chat/completions` | ✅ OpenAI-compatible | Chat Completions 文本与图片工作流兼容入口 |
+| `POST /v1/responses` | ✅ OpenAI-compatible | Responses 文本与 `image_generation` 工具调用兼容入口 |
+
+这些接口统一使用：
+
+```http
+Authorization: Bearer <HappyImage 用户 key 或 HAPPYIMAGE_AUTH_KEY>
+```
+
+### 不建议放入 NewAPI OpenAI 渠道的接口
+
+| 接口 | 原因 | 应该怎么调用 |
+|:--|:--|:--|
+| `/api/auth/*`、`/api/settings`、`/api/accounts/*` | Web 登录、OIDC、配置和账号池管理，不是模型协议 | happyimage-web 直连 HappyImage API |
+| `/api/image-tasks/*`、`/api/images/*`、`/images/*`、`/image-thumbnails/*` | 用户图库、历史任务、私有图片签名链接和下载 | happyimage-web 直连 HappyImage API |
+| `/api/seed-gallery/*`、`/api/user-gallery/*`、`/api/share-drafts/*` | HappyImage 产品图库和分享草稿能力 | happyimage-web 直连 HappyImage API |
+| `/api/recharge/*` | 充值会话和 NewAPI 回调适配 | 浏览器 / NewAPI 回调直连 HappyImage API |
+| `POST /v1/messages` | Anthropic Messages 兼容入口，不是 OpenAI-compatible channel | 仅在 NewAPI 明确支持 Anthropic 转发时单独配置 |
+| `POST /v1/search` | HappyImage 扩展搜索入口 | 自定义客户端直连 HappyImage API |
+| `POST /v1/ppt/generations`、`POST /v1/psd/generations`、`GET /v1/editable-file-tasks` | HappyImage 扩展任务接口，非 OpenAI 标准 | 自定义客户端直连 HappyImage API |
+
+### HappyImage 配置
+
+生产环境建议设置：
+
+```bash
+HAPPYIMAGE_AUTH_KEY=replace_with_admin_or_upstream_key
+HAPPYIMAGE_SESSION_SECRET=replace_with_stable_session_secret
+HAPPYIMAGE_BASE_URL=https://api.example.com
+HAPPYIMAGE_API_BASE_URL=https://api.example.com
+HAPPYIMAGE_FRONTEND_BASE_URL=https://image.example.com
+HAPPYIMAGE_CORS_ORIGINS=https://image.example.com
+```
+
+如果需要用户登录后恢复历史会话和图库，建议启用数据库存储：
+
+```bash
+STORAGE_BACKEND=postgres
+DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happyimage
+```
+
+`STORAGE_BACKEND=sqlite` 也可用于单机部署。数据库模式下，用户、密钥和图片任务历史会写入数据库；首次切换到数据库且 `image_tasks` 表为空时，会自动从旧的 `data/image_tasks.json` 导入图片任务历史。
+
+### NewAPI 渠道配置
+
+在 NewAPI 新建渠道：
+
+| 配置项 | 值 |
+|:--|:--|
+| 渠道类型 | OpenAI-compatible / 自定义 OpenAI API |
+| Base URL | `https://api.example.com/v1` |
+| API Key | HappyImage 用户 key，或管理员 `HAPPYIMAGE_AUTH_KEY` |
+| 模型 | 从 `GET /v1/models` 同步，至少包含 `gpt-image-2`、`auto` |
+
+用 curl 验证 NewAPI 到 HappyImage 的上游链路：
+
+```bash
+curl https://<newapi-host>/v1/models \
+  -H "Authorization: Bearer <NewAPI token>"
+
+curl https://<newapi-host>/v1/images/generations \
+  -H "Authorization: Bearer <NewAPI token>" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-image-2","prompt":"a small product photo on a white table","response_format":"b64_json"}'
+```
+
+### happyimage-web 配置方式
+
+如果希望 happyimage-web 的模型调用经过 NewAPI，同时保留登录、图库、历史、充值等 HappyImage 产品能力，前端应拆成两个后端地址：
+
+| 用途 | 地址 |
+|:--|:--|
+| 应用接口、登录、图库、任务历史 | `https://api.example.com` |
+| OpenAI-compatible 模型调用 | `https://<newapi-host>/v1` |
+
+也就是说，`/api/*`、`/images/*` 走 HappyImage API；`/v1/models`、`/v1/images/generations`、`/v1/images/edits`、`/v1/chat/completions`、`/v1/responses` 可以走 NewAPI。
+
+本仓库内置了模拟 NewAPI 转发链路测试：
+
+```bash
+uv run pytest -q test/test_newapi_gateway_chain.py
+```
+
+该测试会验证 NewAPI token 到 HappyImage Bearer key 的转发、核心 OpenAI-compatible 接口响应形状，以及 `/api/*` 不属于 NewAPI 通道。
+
 ## 常用运维命令
 
 ```bash
