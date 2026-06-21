@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import base64
 import threading
 import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from services.auth_service import auth_service
 from services.config import DATA_DIR, config
 from services.content_filter import request_text
+from services.image_storage_service import image_storage_service
 from services.image_task_store import ImageTaskStore, JSONImageTaskStore, create_image_task_store
 from services.log_service import LOG_TYPE_CALL, log_service
 from services.protocol import openai_v1_image_edit, openai_v1_image_generations
@@ -60,6 +63,62 @@ def _collect_image_urls(data: list[Any]) -> list[str]:
             if isinstance(url, str) and url:
                 urls.append(url)
     return urls
+
+
+def _is_http_url(value: str) -> bool:
+    try:
+        return urlparse(value).scheme in {"http", "https"}
+    except Exception:
+        return False
+
+
+def _is_own_image_url(value: str, base_url: str) -> bool:
+    normalized_base = _clean(base_url or config.base_url).rstrip("/")
+    return bool(normalized_base and value.startswith(f"{normalized_base}/images/"))
+
+
+def _download_remote_image(url: str) -> bytes:
+    from curl_cffi import requests
+
+    session = requests.Session()
+    try:
+        response = session.get(url, timeout=120, impersonate="chrome")
+        if response.status_code >= 400:
+            raise RuntimeError(f"image download failed (HTTP {response.status_code})")
+        payload = bytes(response.content or b"")
+    finally:
+        session.close()
+    if not payload:
+        raise RuntimeError("image download returned empty response")
+    return payload
+
+
+def _materialize_gateway_images(data: list[Any], *, base_url: str, owner_id: str) -> list[Any]:
+    materialized: list[Any] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            materialized.append(entry)
+            continue
+        item = dict(entry)
+        image_data: bytes | None = None
+        b64_json = _clean(item.get("b64_json"))
+        url = _clean(item.get("url"))
+        if b64_json:
+            try:
+                image_data = base64.b64decode(b64_json)
+            except Exception as exc:
+                raise RuntimeError("gateway returned invalid base64 image data") from exc
+        elif url and _is_http_url(url) and not _is_own_image_url(url, base_url):
+            image_data = _download_remote_image(url)
+            item["source_url"] = url
+        if image_data is not None:
+            stored = image_storage_service.save(image_data, base_url=base_url, owner_id=owner_id)
+            item["url"] = stored.url
+            item["path"] = stored.rel
+            item["storage"] = stored.storage
+            item.pop("b64_json", None)
+        materialized.append(item)
+    return materialized
 
 
 def _normalize_feedback(value: object) -> str | None:
@@ -364,7 +423,8 @@ class ImageTaskService:
             from services import model_gateway_service
 
             model_gateway_service.ensure_available()
-            if model_gateway_service.is_enabled():
+            gateway_enabled = model_gateway_service.is_enabled()
+            if gateway_enabled:
                 result = (
                     model_gateway_service.edit_image(payload_with_progress)
                     if mode == "edit"
@@ -387,6 +447,12 @@ class ImageTaskService:
                 if account_email:
                     setattr(error, "account_email", account_email)
                 raise error
+            if gateway_enabled:
+                data = _materialize_gateway_images(
+                    data,
+                    base_url=_clean(payload.get("base_url")),
+                    owner_id=_owner_id(identity),
+                )
             usage = result.get("usage")
             duration_ms = int((time.time() - started) * 1000)
             self._update_task(key, status=TASK_STATUS_SUCCESS, data=data, usage=usage, error="", duration_ms=duration_ms)

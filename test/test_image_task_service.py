@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from services.image_storage_service import StoredImage
 from services.image_task_store import DatabaseImageTaskStore
 from services.image_task_service import ImageTaskService
 
@@ -169,6 +170,38 @@ class ImageTaskServiceTests(unittest.TestCase):
             assert task["status"] == "error"
             assert task["prompt"] == "a clean product photo"
             assert "gateway quota exhausted" in task["error"]
+
+    def test_gateway_remote_url_is_materialized_to_local_storage(self):
+        identity = {"id": "user-1", "role": "user", "image_quota": 10}
+        service = self.make_service()
+        stored = StoredImage(
+            rel="2026/06/21/generated.png",
+            url="http://api.test/images/2026/06/21/generated.png?hi_img_token=test",
+            storage="local",
+            size=8,
+        )
+
+        with patch("services.image_task_service.auth_service.reserve_image_quota", return_value=False), \
+             patch("services.model_gateway_service.is_required", return_value=True), \
+             patch("services.model_gateway_service.is_enabled", return_value=True), \
+             patch("services.model_gateway_service.generate_image", return_value={"data": [{"url": "https://gateway.test/image.png"}]}), \
+             patch("services.image_task_service._download_remote_image", return_value=b"png-data") as download, \
+             patch("services.image_task_service.image_storage_service.save", return_value=stored) as save:
+            service.submit_generation(
+                identity,
+                client_task_id="gateway-local-image",
+                prompt="cat",
+                model="gpt-image-2",
+                size=None,
+                base_url="http://api.test",
+            )
+            task = wait_for_task(service, identity, "gateway-local-image", "success", timeout=3)
+
+        download.assert_called_once_with("https://gateway.test/image.png")
+        save.assert_called_once_with(b"png-data", base_url="http://api.test", owner_id="user-1")
+        self.assertEqual(task["data"][0]["url"], stored.url)
+        self.assertEqual(task["data"][0]["source_url"], "https://gateway.test/image.png")
+        self.assertEqual(task["data"][0]["path"], stored.rel)
 
     def test_duplicate_submit_uses_existing_task(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
