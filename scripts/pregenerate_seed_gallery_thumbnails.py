@@ -8,7 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from services.seed_gallery_service import THUMBNAIL_WIDTHS, seed_gallery_service
+from services.seed_gallery_service import CANDIDATE_GALLERY_DIR, SEED_GALLERY_INDEX, THUMBNAIL_WIDTHS, SeedGalleryService, seed_gallery_service
 
 
 def parse_widths(value: str) -> list[int]:
@@ -46,9 +46,28 @@ def main() -> int:
     )
     parser.add_argument("--limit", type=int, default=0, help="Only process the first N images. Default: all.")
     parser.add_argument("--quiet", action="store_true", help="Only print the final summary.")
+    parser.add_argument(
+        "--seed-dir",
+        default="",
+        help="Optional seed gallery directory containing records/evolink_cases.json and images/.",
+    )
+    parser.add_argument(
+        "--candidate-dir",
+        default="",
+        help="Optional candidate gallery root containing */records/candidates.json and */images/.",
+    )
     args = parser.parse_args()
 
-    image_paths = seed_gallery_service.list_image_paths()
+    service = seed_gallery_service
+    if args.seed_dir or args.candidate_dir:
+        seed_dir = Path(args.seed_dir).expanduser().resolve() if args.seed_dir else SEED_GALLERY_INDEX.parents[1]
+        service = SeedGalleryService(
+            index_file=seed_dir / "records" / "evolink_cases.json",
+            images_dir=seed_dir / "images",
+            candidate_root=Path(args.candidate_dir).expanduser().resolve() if args.candidate_dir else CANDIDATE_GALLERY_DIR,
+        )
+
+    image_paths = service.list_image_paths()
     if args.limit > 0:
         image_paths = image_paths[: args.limit]
 
@@ -66,12 +85,12 @@ def main() -> int:
 
     job_index = 0
     for image_path in image_paths:
-        source_path = seed_gallery_service.resolve_image_path(image_path)
+        source_path = service.resolve_image_path(image_path)
         for width in args.widths:
             job_index += 1
-            thumbnail_path = seed_gallery_service.get_thumbnail_path(width, image_path)
+            thumbnail_path = service.get_thumbnail_path(width, image_path)
             was_current = is_current_thumbnail(thumbnail_path, source_path)
-            resolved = seed_gallery_service.resolve_thumbnail_path(width, image_path)
+            resolved = service.resolve_thumbnail_path(width, image_path)
             if resolved is None or resolved.suffix != ".webp":
                 if resolved == source_path:
                     unsupported.append(f"{width}:{image_path}")

@@ -14,7 +14,7 @@ HappyImage API is organized around FastAPI routes, business services, protocol a
 | `scripts/` | Operational scripts, migrations, one-off maintenance tools |
 | `test/` | Pytest test suite |
 | `docs/` | Deployment, architecture, feature, and product notes |
-| `data/image-gallery-seed/` | Official gallery source data for export scripts |
+| `../happyimage-gallery-source/` | Large official gallery source data kept outside this git repository |
 
 ## Layering Guidelines
 

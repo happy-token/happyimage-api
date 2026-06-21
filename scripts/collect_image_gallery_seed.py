@@ -349,7 +349,7 @@ def csv_escape(value: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect CC0 image prompt gallery seed data.")
-    parser.add_argument("--output", default="data/image-gallery-seed", help="Output directory")
+    parser.add_argument("--output", default="../happyimage-gallery-source/image-gallery-seed", help="Output directory")
     parser.add_argument("--skip-download", action="store_true", help="Only create metadata")
     parser.add_argument("--workers", type=int, default=12, help="Concurrent image downloads")
     parser.add_argument(

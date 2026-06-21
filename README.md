@@ -30,7 +30,7 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 |:--|:--|
 | `api/` | FastAPI 路由和请求解析 |
 | `services/` | 业务服务、协议适配、存储后端 |
-| `data/image-gallery-seed/` | 官方图库源数据，使用脚本导出为 web 静态包 |
+| `../happyimage-gallery-source/image-gallery-seed/` | 官方图库源数据，使用脚本导出为 web 静态包 |
 | `scripts/` | 迁移、测试、部署和容器启动脚本 |
 | `docs/` | 部署、功能状态和产品研究文档 |
 | `config.example.json` | 应用配置模板 |
@@ -206,7 +206,7 @@ Docker 部署时，容器内 `/app/data` 会挂载到仓库目录下的 `./data`
 | `data/image_tasks.json`、`data/editable_file_tasks.json` | 图片 / PPT / PSD 任务状态 | 否 |
 | `data/auth_keys.json`、`data/accounts.db` | 用户密钥、用户数据或数据库文件 | 否，敏感 |
 | `data/logs.jsonl`、`data/share_drafts.json`、`data/image_tags.json` | 日志、分享草稿、图片标签 | 否，可能敏感 |
-| `data/image-gallery-seed/` | 官方图库源数据 | 不建议继续放大体积图片；生产使用 web 静态包 |
+| `../happyimage-gallery-source/image-gallery-seed/` | 官方图库源数据 | 仓库外保存；生产使用 web 静态包 |
 
 迁移到服务器时，至少需要迁移：
 

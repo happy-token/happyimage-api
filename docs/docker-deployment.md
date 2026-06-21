@@ -139,8 +139,17 @@ docker run -p 3000:3000 \
 官方图库是 web 静态包，不再内置到 API 镜像。生成或更新静态包：
 
 ```bash
-uv run python scripts/pregenerate_seed_gallery_thumbnails.py --widths 640 --quiet
-uv run python scripts/export_seed_gallery_static.py --output /srv/happyimage/seed-gallery --copy-assets
+uv run python scripts/pregenerate_seed_gallery_thumbnails.py \
+  --seed-dir ~/workspace/happyimage-gallery-source/image-gallery-seed \
+  --candidate-dir ~/workspace/happyimage-gallery-source/image-gallery-candidates \
+  --widths 640 \
+  --quiet
+
+uv run python scripts/export_seed_gallery_static.py \
+  --seed-dir ~/workspace/happyimage-gallery-source/image-gallery-seed \
+  --candidate-dir ~/workspace/happyimage-gallery-source/image-gallery-candidates \
+  --output /srv/happyimage/seed-gallery \
+  --copy-assets
 ```
 
 `/srv/happyimage/seed-gallery` 应包含 `static/items.json`、`images/` 和 `thumbnails/w640/`。该目录可能很大，建议放在服务器磁盘、对象存储或 CDN，不要提交到 GitHub。
@@ -238,7 +247,7 @@ DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happyimage
 | `data/image_tasks.json`、`data/editable_file_tasks.json` | 图片 / PPT / PSD 任务状态 | 需要保留任务历史时迁移 |
 | `data/auth_keys.json`、`data/accounts.db` | 用户密钥、用户数据或 SQLite 数据库 | 敏感，按生产数据迁移 |
 | `data/logs.jsonl`、`data/share_drafts.json`、`data/image_tags.json` | 日志、分享草稿、图片标签 | 需要保留后台数据时迁移 |
-| `data/image-gallery-seed/` | 官方图库源数据 | 用于导出 web 静态包；生产不需要挂载到 API 容器 |
+| `../happyimage-gallery-source/image-gallery-seed/` | 官方图库源数据 | 仓库外保存，用于导出 web 静态包；生产不需要挂载到 API 容器 |
 
 完整迁移示例：
 

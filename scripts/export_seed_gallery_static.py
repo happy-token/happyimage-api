@@ -12,10 +12,10 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from services.seed_gallery_service import seed_gallery_service
+from services.seed_gallery_service import CANDIDATE_GALLERY_DIR, SEED_GALLERY_INDEX, SeedGalleryService, seed_gallery_service
 
 
-def _rewrite_image_urls(item: dict[str, Any]) -> dict[str, Any]:
+def _rewrite_image_urls(service: SeedGalleryService, item: dict[str, Any]) -> dict[str, Any]:
     cloned = dict(item)
     images = []
     for image in item.get("images") or []:
@@ -25,7 +25,7 @@ def _rewrite_image_urls(item: dict[str, Any]) -> dict[str, Any]:
         relative = str(image_copy.get("path") or "").removeprefix("images/").lstrip("/")
         if relative:
             image_copy["url"] = f"/seed-gallery/images/{relative}"
-            thumbnail_path = seed_gallery_service.get_thumbnail_path(640, relative)
+            thumbnail_path = service.get_thumbnail_path(640, relative)
             if thumbnail_path and thumbnail_path.is_file():
                 image_copy["thumbnail_url"] = f"/seed-gallery/thumbnails/w640/{Path(relative).with_suffix('.webp').as_posix()}"
             else:
@@ -35,27 +35,40 @@ def _rewrite_image_urls(item: dict[str, Any]) -> dict[str, Any]:
     return cloned
 
 
-def _copy_tree(source: Path, target: Path) -> None:
-    if not source.exists():
-        return
-    target.mkdir(parents=True, exist_ok=True)
-    for source_path in source.rglob("*"):
-        if not source_path.is_file():
-            continue
-        relative = source_path.relative_to(source)
-        target_path = target / relative
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, target_path)
+def _copy_item_assets(service: SeedGalleryService, items: list[dict[str, Any]], output_dir: Path) -> None:
+    copied: set[Path] = set()
+    for item in items:
+        for image in item.get("images") or []:
+            if not isinstance(image, dict):
+                continue
+            relative = str(image.get("path") or "").removeprefix("images/").lstrip("/")
+            if not relative:
+                continue
+            source_path = service.resolve_image_path(relative)
+            if source_path and source_path.is_file():
+                target_path = output_dir / "images" / relative
+                if target_path not in copied:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source_path, target_path)
+                    copied.add(target_path)
+
+            thumbnail_path = service.get_thumbnail_path(640, relative)
+            if thumbnail_path and thumbnail_path.is_file():
+                target_path = output_dir / "thumbnails" / "w640" / Path(relative).with_suffix(".webp")
+                if target_path not in copied:
+                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(thumbnail_path, target_path)
+                    copied.add(target_path)
 
 
-def export_static_gallery(output_dir: Path, *, copy_assets: bool) -> None:
+def export_static_gallery(service: SeedGalleryService, output_dir: Path, *, copy_assets: bool) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     static_dir = output_dir / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
 
-    items = sorted(seed_gallery_service._load_items(), key=seed_gallery_service._display_item_priority)  # noqa: SLF001
-    public_items = [_rewrite_image_urls(item) for item in items]
-    facets = seed_gallery_service.facets()
+    items = sorted(service._load_items(), key=service._display_item_priority)  # noqa: SLF001
+    public_items = [_rewrite_image_urls(service, item) for item in items]
+    facets = service.facets()
     generated_at = datetime.now(UTC).isoformat()
 
     (static_dir / "items.json").write_text(
@@ -72,9 +85,7 @@ def export_static_gallery(output_dir: Path, *, copy_assets: bool) -> None:
     )
 
     if copy_assets:
-        seed_root = seed_gallery_service.images_dir.parent
-        _copy_tree(seed_root / "images", output_dir / "images")
-        _copy_tree(seed_root / "thumbnails", output_dir / "thumbnails")
+        _copy_item_assets(service, items, output_dir)
 
 
 def main() -> None:
@@ -89,8 +100,27 @@ def main() -> None:
         action="store_true",
         help="Copy images and pregenerated thumbnails into the output directory. Omit this when assets are mounted separately.",
     )
+    parser.add_argument(
+        "--seed-dir",
+        default="",
+        help="Optional seed gallery directory containing records/evolink_cases.json and images/.",
+    )
+    parser.add_argument(
+        "--candidate-dir",
+        default="",
+        help="Optional candidate gallery root containing */records/candidates.json and */images/.",
+    )
     args = parser.parse_args()
-    export_static_gallery(Path(args.output).resolve(), copy_assets=args.copy_assets)
+    if args.seed_dir or args.candidate_dir:
+        seed_dir = Path(args.seed_dir).expanduser().resolve() if args.seed_dir else SEED_GALLERY_INDEX.parents[1]
+        service = SeedGalleryService(
+            index_file=seed_dir / "records" / "evolink_cases.json",
+            images_dir=seed_dir / "images",
+            candidate_root=Path(args.candidate_dir).expanduser().resolve() if args.candidate_dir else CANDIDATE_GALLERY_DIR,
+        )
+    else:
+        service = seed_gallery_service
+    export_static_gallery(service, Path(args.output).resolve(), copy_assets=args.copy_assets)
 
 
 if __name__ == "__main__":
