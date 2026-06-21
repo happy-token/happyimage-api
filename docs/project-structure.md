@@ -34,6 +34,28 @@ Use `.env` for deployment-specific values such as secrets, public URLs, proxy se
 
 Runtime data lives under `data/`, but only `data/image-gallery-seed/` is versioned. Generated logs, images, task state, databases, and local caches should remain untracked.
 
+Generated caches and local work products should stay ignored and can be deleted when cleaning a workspace:
+
+| Path | Notes |
+|:--|:--|
+| `__pycache__/`, `*/__pycache__/` | Python bytecode cache. |
+| `.pytest_cache/` | Pytest local cache. |
+| `.worktrees/` | Temporary agent or feature worktrees; remove after merging or abandoning their branches. |
+| `.venv/` | Local Python dependency environment; keep if actively developing, otherwise recreate with `uv sync`. |
+
+Do not delete `.env`, `config.json`, or `data/*` during cleanup unless the operator explicitly wants to reset local runtime state. Those files can contain secrets, user history, generated images, and account data.
+
+## Documentation Map
+
+| Document | Purpose |
+|:--|:--|
+| `README.md` | Main setup, configuration, NewAPI overview, operations commands. |
+| `docs/newapi-gateway.md` | Authoritative NewAPI integration and HappyImage Web model-gateway chain. |
+| `docs/technical-log.md` | Bug history, root causes, fixes, and verification notes for future sessions. |
+| `docs/docker-deployment.md` | Docker deployment and server operations. |
+| `docs/feature-status.en.md` | Feature support matrix. |
+| `docs/gallery-curation.md` | Gallery seed and curation workflow. |
+
 ## Script Conventions
 
 Scripts in `scripts/` should be safe to run from the repository root with `uv run python scripts/<name>.py` unless the script documents otherwise.

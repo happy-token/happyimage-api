@@ -36,7 +36,7 @@ HappyImage API 是 HappyImage 的 FastAPI 后端，提供 OpenAI 兼容的图片
 | `config.example.json` | 应用配置模板 |
 | `.env.example` | Docker / 环境变量模板 |
 
-更多分层和维护约定见 [项目结构说明](docs/project-structure.md)。
+更多分层和维护约定见 [项目结构说明](docs/project-structure.md)。重大故障、根因和修复记录见 [技术日志](docs/technical-log.md)；开始新的排障 session 前建议先读该日志。
 
 ## 关联项目
 
@@ -274,6 +274,8 @@ Web 管理接口位于 `/api/*`，支持 Cookie 会话或 Bearer token。`/v1/*`
 ## NewAPI 网关兼容性
 
 HappyImage 可以作为 NewAPI 的 OpenAI-compatible 上游注册，但不是所有 Web 请求都应该经过 NewAPI。NewAPI 只适合代理模型调用；HappyImage Web 应用态接口仍应直连 HappyImage API。
+
+完整接入方式、双向链路、同源代理配置、图片本地化和验证命令见 [NewAPI Gateway](docs/newapi-gateway.md)。本节保留核心清单，便于快速查阅。
 
 ### NewAPI 可代理接口
 
