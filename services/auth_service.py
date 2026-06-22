@@ -624,6 +624,47 @@ class AuthService:
 
             return self._public_item(item)
 
+    def apply_newapi_default_provider(
+        self,
+        key_id: str,
+        *,
+        base_url: str,
+        api_key: str,
+    ) -> dict[str, object] | None:
+        normalized_id = self._clean(key_id)
+        normalized_base_url = self._clean(base_url).rstrip("/")
+        normalized_api_key = self._clean(api_key)
+        if not normalized_id:
+            return None
+        if not normalized_base_url or not normalized_api_key:
+            raise ValueError("NewAPI 默认供应商配置不完整")
+        provider = {
+            "id": "newapi-default",
+            "type": "newapi",
+            "base_url": normalized_base_url[:512],
+            "api_key": normalized_api_key,
+            "selected": True,
+        }
+        with self._lock:
+            self._reload_locked()
+            for index, item in enumerate(self._items):
+                if item.get("id") != normalized_id:
+                    continue
+                providers = self._normalize_model_providers(item.get("model_providers"))
+                next_providers = [
+                    {**existing, "selected": False}
+                    for existing in providers
+                    if self._clean(existing.get("id")) != "newapi-default"
+                ]
+                next_providers.append(provider)
+                next_item = dict(item)
+                next_item["model_providers"] = next_providers
+                next_item = self._sync_legacy_model_provider_fields(next_item)
+                self._items[index] = next_item
+                self._save()
+                return self._public_item(next_item)
+        return None
+
     def authenticate(self, raw_key: str) -> dict[str, object] | None:
         candidate = self._clean(raw_key)
         if not candidate:
