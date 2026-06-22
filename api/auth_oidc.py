@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from services.auth_service import auth_service
 from services.config import config
 from services import model_gateway_service
+from services.newapi_binding_service import newapi_binding_service
 from services.oidc_service import OIDCError, oidc_service
 from services.web_session_service import web_session_service
 from api.support import resolve_identity_for_request
@@ -37,6 +38,57 @@ def _request_external_base_url(request: Request) -> str:
     if not host:
         return ""
     return f"{proto}://{host}".rstrip("/")
+
+
+def _with_newapi_binding_status(identity: dict[str, object], binding: dict[str, object]) -> dict[str, object]:
+    next_identity = dict(identity)
+    next_identity["newapi_binding_status"] = str(
+        binding.get("status") or ("configured" if binding.get("ok") else "pending")
+    )
+    next_identity["newapi_management_url"] = str(binding.get("management_url") or "").strip()
+    message = str(binding.get("message") or "").strip()
+    if message:
+        next_identity["newapi_binding_message"] = message
+    return next_identity
+
+
+def _newapi_session_fields(identity: dict[str, object]) -> dict[str, object]:
+    fields: dict[str, object] = {}
+    for key in ("model_base_url", "newapi_binding_status", "newapi_binding_message", "newapi_management_url"):
+        value = str(identity.get(key) or "").strip()
+        if value:
+            fields[key] = value
+    if identity.get("model_api_key_configured") is not None:
+        fields["model_api_key_configured"] = bool(identity.get("model_api_key_configured"))
+    return fields
+
+
+def _newapi_binding_identity_fields(identity: dict[str, object]) -> dict[str, object]:
+    fields: dict[str, object] = {}
+    for key in ("newapi_binding_status", "newapi_binding_message", "newapi_management_url"):
+        value = str(identity.get(key) or "").strip()
+        if value:
+            fields[key] = value
+    return fields
+
+
+def _create_session_with_identity_fields(identity: dict[str, object]) -> tuple[str, str]:
+    payload = web_session_service.create_session_payload(identity)
+    payload.update(_newapi_session_fields(identity))
+    token = web_session_service.sign_session(payload)
+    cookie = web_session_service.make_set_cookie_header(token)
+    return token, cookie
+
+
+def _session_newapi_fields(request: Request) -> dict[str, object]:
+    cookie_value = request.cookies.get(web_session_service.cookie_name, "")
+    if not cookie_value:
+        return {}
+    try:
+        payload = web_session_service.verify_session(cookie_value)
+    except Exception:
+        return {}
+    return _newapi_session_fields(payload)
 
 
 def create_router() -> APIRouter:
@@ -112,6 +164,31 @@ def create_router() -> APIRouter:
                 status_code=403, detail={"error": str(exc)}
             ) from exc
 
+        binding = await run_in_threadpool(
+            newapi_binding_service.ensure_default_token,
+            provider="casdoor",
+            subject=str(oidc_claims.get("sub") or ""),
+            email=str(oidc_claims.get("email") or ""),
+            name=str(oidc_claims.get("name") or ""),
+        )
+        if binding.get("ok"):
+            try:
+                updated_user = await run_in_threadpool(
+                    auth_service.apply_newapi_default_provider,
+                    str(user_item.get("id") or ""),
+                    base_url=str(binding.get("base_url") or ""),
+                    api_key=str(binding.get("token") or ""),
+                )
+                if updated_user is not None:
+                    user_item = updated_user
+            except ValueError:
+                binding = {
+                    **binding,
+                    "ok": False,
+                    "status": "failed",
+                    "message": "NewAPI 默认供应商配置不完整",
+                }
+
         # Create web session
         identity = {
             "id": user_item.get("id", ""),
@@ -130,7 +207,8 @@ def create_router() -> APIRouter:
             value = str(user_item.get(key) or "").strip()
             if value:
                 identity[key] = value
-        _token, cookie = web_session_service.create_session(identity)
+        identity = _with_newapi_binding_status(identity, binding)
+        _token, cookie = _create_session_with_identity_fields(identity)
 
         # Redirect to frontend
         frontend_base = config.frontend_base_url or "/"
@@ -164,6 +242,10 @@ def create_router() -> APIRouter:
             )
 
         # Refresh identity from current user data
+        session_newapi_fields = {
+            **_newapi_binding_identity_fields(identity),
+            **_newapi_binding_identity_fields(_session_newapi_fields(request)),
+        }
         identity = {
             "id": user_item.get("id", ""),
             "name": user_item.get("name", ""),
@@ -187,6 +269,9 @@ def create_router() -> APIRouter:
             value = str(user_item.get(key) or "").strip()
             if value:
                 identity[key] = value
+        for key, value in session_newapi_fields.items():
+            if value != "":
+                identity[key] = value
 
         role = "admin" if identity.get("role") == "admin" else "user"
         subject_id = str(identity.get("id") or "").strip() or role
@@ -201,7 +286,7 @@ def create_router() -> APIRouter:
         preferences = identity.get("preferences") if isinstance(identity.get("preferences"), dict) else {}
         external_identity = {
             key: str(identity.get(key) or "").strip()
-            for key in ("auth_provider", "auth_subject", "email")
+            for key in ("auth_provider", "auth_subject", "email", "newapi_binding_status", "newapi_binding_message", "newapi_management_url")
             if str(identity.get(key) or "").strip()
         }
 
