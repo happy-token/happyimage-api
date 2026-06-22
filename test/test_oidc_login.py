@@ -231,6 +231,8 @@ def test_oidc_callback_applies_newapi_default_provider_when_binding_succeeds():
         ]
         assert payload["newapi_binding_status"] == "configured"
         assert payload["newapi_management_url"] == "https://gateway.happy-token.cn"
+        assert "sk-user-token" not in str(payload)
+        assert "model_api_key" not in payload
 
 
 def test_oidc_callback_allows_login_when_newapi_binding_is_pending():
@@ -310,6 +312,75 @@ def test_oidc_callback_allows_login_when_newapi_binding_is_pending():
         )
 
 
+def test_oidc_callback_allows_login_when_newapi_provider_apply_fails():
+    app = FastAPI()
+    app.include_router(auth_oidc_api.create_router())
+
+    user_item = {
+        "id": "user-oidc-failed",
+        "name": "Creator",
+        "role": "user",
+        "enabled": True,
+        "auth_provider": "casdoor",
+        "auth_subject": "subject-failed",
+        "email": "creator-failed@example.com",
+    }
+
+    with (
+        mock.patch.dict(
+            os.environ,
+            {
+                "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
+                "HAPPYTOKEN_OIDC_ENABLED": "true",
+                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://web.example.com",
+            },
+            clear=False,
+        ),
+        mock.patch.object(
+            auth_oidc_api.oidc_service,
+            "handle_callback",
+            return_value={
+                "sub": "subject-failed",
+                "email": "creator-failed@example.com",
+                "name": "Creator",
+                "next_path": "/image",
+            },
+        ),
+        mock.patch.object(
+            auth_oidc_api.auth_service,
+            "find_or_create_oidc_user",
+            return_value=user_item,
+        ),
+        mock.patch.object(
+            auth_oidc_api.newapi_binding_service,
+            "ensure_default_token",
+            return_value={
+                "ok": True,
+                "status": "configured",
+                "base_url": "",
+                "management_url": "https://gateway.happy-token.cn",
+                "token": "sk-user-token",
+            },
+        ),
+        mock.patch.object(
+            auth_oidc_api.auth_service,
+            "apply_newapi_default_provider",
+            side_effect=ValueError("NewAPI 默认供应商配置不完整"),
+        ),
+    ):
+        response = TestClient(app).get(
+            "/api/auth/oidc/callback?code=code&state=state", follow_redirects=False
+        )
+
+        assert response.status_code == 302, response.text
+        cookie = response.headers["set-cookie"]
+        token = cookie.split("happytoken_session=", 1)[1].split(";", 1)[0]
+        payload = web_session_service.verify_session(token)
+    assert payload["newapi_binding_status"] == "failed"
+    assert payload["newapi_binding_message"] == "NewAPI 默认供应商配置不完整"
+    assert "sk-user-token" not in str(payload)
+
+
 def test_get_session_preserves_newapi_binding_fields_from_session_identity():
     app = FastAPI()
     app.include_router(auth_oidc_api.create_router())
@@ -359,6 +430,64 @@ def test_get_session_preserves_newapi_binding_fields_from_session_identity():
         == "NewAPI provisioning endpoint is not configured"
     )
     assert payload["user"]["newapi_management_url"] == "https://gateway.happy-token.cn"
+
+
+def test_get_session_ignores_newapi_cookie_fields_from_different_user():
+    app = FastAPI()
+    app.include_router(auth_oidc_api.create_router())
+
+    user_item = {
+        "id": "bearer-user",
+        "name": "Bearer Creator",
+        "role": "user",
+        "enabled": True,
+    }
+
+    with mock.patch.dict(
+        os.environ,
+        {"HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret"},
+        clear=False,
+    ):
+        stale_token = web_session_service.sign_session(
+            {
+                "sub": "cookie-user",
+                "name": "Cookie Creator",
+                "role": "user",
+                "iat": 1,
+                "exp": 9999999999,
+                "newapi_binding_status": "pending",
+                "newapi_binding_message": "stale cookie status",
+                "newapi_management_url": "https://stale.example.com",
+            }
+        )
+        with (
+            mock.patch.object(
+                auth_oidc_api,
+                "resolve_identity_for_request",
+                return_value={
+                    "id": "bearer-user",
+                    "name": "Bearer Creator",
+                    "role": "user",
+                },
+            ),
+            mock.patch.object(
+                auth_oidc_api.auth_service,
+                "get_key",
+                return_value=user_item,
+            ),
+        ):
+            client = TestClient(app)
+            client.cookies.set(web_session_service.cookie_name, stale_token)
+            response = client.get(
+                "/api/auth/session", headers={"Authorization": "Bearer bearer-token"}
+            )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert "newapi_binding_status" not in payload
+    assert "newapi_binding_message" not in payload
+    assert "newapi_management_url" not in payload
+    assert "newapi_binding_status" not in payload["user"]
 
 
 def test_logout_clear_cookie_matches_cross_site_secure_cookie_attributes():

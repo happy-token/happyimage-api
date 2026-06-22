@@ -111,13 +111,17 @@ def _create_session_with_identity_fields(
     return token, cookie
 
 
-def _session_newapi_fields(request: Request) -> dict[str, object]:
+def _session_newapi_fields(
+    request: Request, *, expected_user_id: str
+) -> dict[str, object]:
     cookie_value = request.cookies.get(web_session_service.cookie_name, "")
     if not cookie_value:
         return {}
     try:
         payload = web_session_service.verify_session(cookie_value)
     except Exception:
+        return {}
+    if str(payload.get("sub") or "").strip() != expected_user_id:
         return {}
     return _newapi_session_fields(payload)
 
@@ -277,7 +281,9 @@ def create_router() -> APIRouter:
         # Refresh identity from current user data
         session_newapi_fields = {
             **_newapi_binding_identity_fields(identity),
-            **_newapi_binding_identity_fields(_session_newapi_fields(request)),
+            **_newapi_binding_identity_fields(
+                _session_newapi_fields(request, expected_user_id=user_id)
+            ),
         }
         identity = {
             "id": user_item.get("id", ""),
