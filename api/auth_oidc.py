@@ -33,19 +33,33 @@ def _request_external_base_url(request: Request) -> str:
     configured = config.api_base_url
     if configured:
         return configured
-    proto = request.headers.get("x-forwarded-proto", request.url.scheme).split(",", 1)[0].strip()
-    host = request.headers.get("x-forwarded-host", request.headers.get("host", request.url.netloc)).split(",", 1)[0].strip()
+    proto = (
+        request.headers.get("x-forwarded-proto", request.url.scheme)
+        .split(",", 1)[0]
+        .strip()
+    )
+    host = (
+        request.headers.get(
+            "x-forwarded-host", request.headers.get("host", request.url.netloc)
+        )
+        .split(",", 1)[0]
+        .strip()
+    )
     if not host:
         return ""
     return f"{proto}://{host}".rstrip("/")
 
 
-def _with_newapi_binding_status(identity: dict[str, object], binding: dict[str, object]) -> dict[str, object]:
+def _with_newapi_binding_status(
+    identity: dict[str, object], binding: dict[str, object]
+) -> dict[str, object]:
     next_identity = dict(identity)
     next_identity["newapi_binding_status"] = str(
         binding.get("status") or ("configured" if binding.get("ok") else "pending")
     )
-    next_identity["newapi_management_url"] = str(binding.get("management_url") or "").strip()
+    next_identity["newapi_management_url"] = str(
+        binding.get("management_url") or ""
+    ).strip()
     message = str(binding.get("message") or "").strip()
     if message:
         next_identity["newapi_binding_message"] = message
@@ -54,25 +68,42 @@ def _with_newapi_binding_status(identity: dict[str, object], binding: dict[str, 
 
 def _newapi_session_fields(identity: dict[str, object]) -> dict[str, object]:
     fields: dict[str, object] = {}
-    for key in ("model_base_url", "newapi_binding_status", "newapi_binding_message", "newapi_management_url"):
+    for key in (
+        "model_provider",
+        "model_base_url",
+        "newapi_binding_status",
+        "newapi_binding_message",
+        "newapi_management_url",
+    ):
         value = str(identity.get(key) or "").strip()
         if value:
             fields[key] = value
+    model_providers = identity.get("model_providers")
+    if isinstance(model_providers, list):
+        fields["model_providers"] = model_providers
     if identity.get("model_api_key_configured") is not None:
-        fields["model_api_key_configured"] = bool(identity.get("model_api_key_configured"))
+        fields["model_api_key_configured"] = bool(
+            identity.get("model_api_key_configured")
+        )
     return fields
 
 
 def _newapi_binding_identity_fields(identity: dict[str, object]) -> dict[str, object]:
     fields: dict[str, object] = {}
-    for key in ("newapi_binding_status", "newapi_binding_message", "newapi_management_url"):
+    for key in (
+        "newapi_binding_status",
+        "newapi_binding_message",
+        "newapi_management_url",
+    ):
         value = str(identity.get(key) or "").strip()
         if value:
             fields[key] = value
     return fields
 
 
-def _create_session_with_identity_fields(identity: dict[str, object]) -> tuple[str, str]:
+def _create_session_with_identity_fields(
+    identity: dict[str, object],
+) -> tuple[str, str]:
     payload = web_session_service.create_session_payload(identity)
     payload.update(_newapi_session_fields(identity))
     token = web_session_service.sign_session(payload)
@@ -113,9 +144,7 @@ def create_router() -> APIRouter:
                 api_base_url=_request_external_base_url(request),
             )
         except OIDCError as exc:
-            raise HTTPException(
-                status_code=400, detail={"error": str(exc)}
-            ) from exc
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return result
 
     @router.get("/api/auth/oidc/callback")
@@ -146,9 +175,7 @@ def create_router() -> APIRouter:
                 state=state,
             )
         except OIDCError as exc:
-            raise HTTPException(
-                status_code=400, detail={"error": str(exc)}
-            ) from exc
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
         # Find or create the Happy Token user bound to this OIDC identity
         try:
@@ -160,9 +187,7 @@ def create_router() -> APIRouter:
                 name=oidc_claims.get("name", ""),
             )
         except ValueError as exc:
-            raise HTTPException(
-                status_code=403, detail={"error": str(exc)}
-            ) from exc
+            raise HTTPException(status_code=403, detail={"error": str(exc)}) from exc
 
         binding = await run_in_threadpool(
             newapi_binding_service.ensure_default_token,
@@ -199,10 +224,20 @@ def create_router() -> APIRouter:
             "model_provider": user_item.get("model_provider") or "",
             "model_base_url": user_item.get("model_base_url") or "",
             "model_api_key_configured": bool(user_item.get("model_api_key_configured")),
-            "model_providers": user_item.get("model_providers") if isinstance(user_item.get("model_providers"), list) else [],
-            "preferences": user_item.get("preferences") if isinstance(user_item.get("preferences"), dict) else {},
+            "model_providers": (
+                user_item.get("model_providers")
+                if isinstance(user_item.get("model_providers"), list)
+                else []
+            ),
+            "preferences": (
+                user_item.get("preferences")
+                if isinstance(user_item.get("preferences"), dict)
+                else {}
+            ),
         }
-        identity.update(auth_service.get_model_gateway_config(str(user_item.get("id") or "")))
+        identity.update(
+            auth_service.get_model_gateway_config(str(user_item.get("id") or ""))
+        )
         for key in ("auth_provider", "auth_subject", "email"):
             value = str(user_item.get(key) or "").strip()
             if value:
@@ -222,7 +257,9 @@ def create_router() -> APIRouter:
         return response
 
     @router.get("/api/auth/session")
-    async def get_session(request: Request, authorization: str | None = Header(default=None)):
+    async def get_session(
+        request: Request, authorization: str | None = Header(default=None)
+    ):
         """Return the current user session from the session cookie or Bearer token.
 
         Returns 401 if no valid session is present.
@@ -233,13 +270,9 @@ def create_router() -> APIRouter:
         user_id = str(identity.get("id") or "")
         user_item = auth_service.get_key(user_id)
         if user_item is None:
-            raise HTTPException(
-                status_code=401, detail={"error": "账号不存在"}
-            )
+            raise HTTPException(status_code=401, detail={"error": "账号不存在"})
         if not bool(user_item.get("enabled", True)):
-            raise HTTPException(
-                status_code=401, detail={"error": "账号已被禁用"}
-            )
+            raise HTTPException(status_code=401, detail={"error": "账号已被禁用"})
 
         # Refresh identity from current user data
         session_newapi_fields = {
@@ -255,13 +288,20 @@ def create_router() -> APIRouter:
             "model_provider": user_item.get("model_provider") or "",
             "model_base_url": user_item.get("model_base_url") or "",
             "model_api_key_configured": bool(user_item.get("model_api_key_configured")),
-            "model_providers": user_item.get("model_providers") if isinstance(user_item.get("model_providers"), list) else [],
+            "model_providers": (
+                user_item.get("model_providers")
+                if isinstance(user_item.get("model_providers"), list)
+                else []
+            ),
             "preferences": (
                 user_item.get("preferences")
-                if isinstance(user_item.get("preferences"), dict) and user_item.get("preferences")
-                else identity.get("preferences")
-                if isinstance(identity.get("preferences"), dict)
-                else {}
+                if isinstance(user_item.get("preferences"), dict)
+                and user_item.get("preferences")
+                else (
+                    identity.get("preferences")
+                    if isinstance(identity.get("preferences"), dict)
+                    else {}
+                )
             ),
         }
         identity.update(auth_service.get_model_gateway_config(user_id))
@@ -275,18 +315,41 @@ def create_router() -> APIRouter:
 
         role = "admin" if identity.get("role") == "admin" else "user"
         subject_id = str(identity.get("id") or "").strip() or role
-        name = str(identity.get("name") or "").strip() or ("管理员" if role == "admin" else "创作者")
+        name = str(identity.get("name") or "").strip() or (
+            "管理员" if role == "admin" else "创作者"
+        )
         watermark_label = str(identity.get("watermark_label") or "").strip()
-        watermark_unlocked = role == "admin" or bool(identity.get("watermark_unlocked", False))
+        watermark_unlocked = role == "admin" or bool(
+            identity.get("watermark_unlocked", False)
+        )
         model_provider = str(identity.get("model_provider") or "").strip()
         model_base_url = str(identity.get("model_base_url") or "").strip().rstrip("/")
-        model_api_key_configured = bool(identity.get("model_api_key_configured")) or bool(str(identity.get("model_api_key") or "").strip())
-        model_gateway_enabled = model_gateway_service.is_enabled(model_base_url, str(identity.get("model_api_key") or ""))
-        model_providers = identity.get("model_providers") if isinstance(identity.get("model_providers"), list) else []
-        preferences = identity.get("preferences") if isinstance(identity.get("preferences"), dict) else {}
+        model_api_key_configured = bool(
+            identity.get("model_api_key_configured")
+        ) or bool(str(identity.get("model_api_key") or "").strip())
+        model_gateway_enabled = model_gateway_service.is_enabled(
+            model_base_url, str(identity.get("model_api_key") or "")
+        )
+        model_providers = (
+            identity.get("model_providers")
+            if isinstance(identity.get("model_providers"), list)
+            else []
+        )
+        preferences = (
+            identity.get("preferences")
+            if isinstance(identity.get("preferences"), dict)
+            else {}
+        )
         external_identity = {
             key: str(identity.get(key) or "").strip()
-            for key in ("auth_provider", "auth_subject", "email", "newapi_binding_status", "newapi_binding_message", "newapi_management_url")
+            for key in (
+                "auth_provider",
+                "auth_subject",
+                "email",
+                "newapi_binding_status",
+                "newapi_binding_message",
+                "newapi_management_url",
+            )
             if str(identity.get(key) or "").strip()
         }
 
@@ -324,6 +387,7 @@ def create_router() -> APIRouter:
     async def logout():
         """Clear the web session cookie."""
         from fastapi.responses import JSONResponse
+
         cookie = web_session_service.make_clear_cookie_header()
         response = JSONResponse(content={"ok": True})
         response.headers["Set-Cookie"] = cookie
