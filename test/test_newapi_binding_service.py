@@ -4,6 +4,7 @@ from unittest import mock
 
 from services.auth_service import AuthService
 from services.config import ConfigStore, CONFIG_FILE
+from services.newapi_binding_service import NewAPIBindingService
 from services.storage.json_storage import JSONStorageBackend
 
 
@@ -102,3 +103,193 @@ def test_apply_newapi_default_provider_preserves_other_providers(tmp_path):
     providers = updated["model_providers"]
     assert [item["id"] for item in providers] == ["manual-provider", "newapi-default"]
     assert [item["selected"] for item in providers] == [False, True]
+
+
+class FakeResponse:
+    def __init__(self, status_code: int, payload: dict[str, object], text: str = "{}"):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self) -> dict[str, object]:
+        return self._payload
+
+
+class FakeSession:
+    def __init__(self, response: FakeResponse | None = None, error: Exception | None = None):
+        self.response = response or FakeResponse(200, {"ok": True, "token": "sk-default"})
+        self.error = error
+        self.posts: list[dict[str, object]] = []
+        self.closed = False
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.posts.append({"url": url, **kwargs})
+        if self.error:
+            raise self.error
+        return self.response
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def _enabled_settings() -> dict[str, object]:
+    return {
+        "enabled": True,
+        "base_url": "https://gateway.happy-token.cn/",
+        "management_url": "https://gateway.happy-token.cn/manage/",
+        "provision_url": "http://newapi:3000/api/internal/happyimage/bind-token",
+        "provision_secret": "provision-secret",
+        "provision_secret_configured": True,
+        "token_name": "HappyImage Default",
+    }
+
+
+def test_newapi_binding_returns_pending_when_disabled_or_unconfigured():
+    service = NewAPIBindingService(
+        settings={**_enabled_settings(), "enabled": False},
+        session_factory=lambda: FakeSession(),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "pending",
+        "message": "NewAPI provisioning endpoint is not configured",
+    }
+
+    service = NewAPIBindingService(
+        settings={**_enabled_settings(), "provision_secret": ""},
+        session_factory=lambda: FakeSession(),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "pending"
+
+
+def test_newapi_binding_calls_configured_provisioning_endpoint_with_auth_and_payload():
+    session = FakeSession(
+        FakeResponse(
+            200,
+            {
+                "ok": True,
+                "user_id": "newapi-user-id",
+                "token_id": "newapi-token-id",
+                "token": "sk-user-token",
+                "base_url": "https://gateway.happy-token.cn/v1/",
+            },
+        )
+    )
+    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+
+    service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert session.posts == [
+        {
+            "url": "http://newapi:3000/api/internal/happyimage/bind-token",
+            "headers": {
+                "Authorization": "Bearer provision-secret",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            "json": {
+                "provider": "casdoor",
+                "subject": "casdoor-sub",
+                "email": "creator@example.com",
+                "name": "Creator",
+                "token_name": "HappyImage Default",
+            },
+            "timeout": 30,
+        }
+    ]
+
+
+def test_newapi_binding_closes_session():
+    session = FakeSession()
+    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+
+    service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert session.closed is True
+
+
+def test_newapi_binding_successful_response_exposes_token_and_base_url():
+    service = NewAPIBindingService(
+        settings=_enabled_settings(),
+        session_factory=lambda: FakeSession(
+            FakeResponse(
+                200,
+                {
+                    "ok": True,
+                    "user_id": "newapi-user-id",
+                    "token_id": "newapi-token-id",
+                    "token": "sk-user-token",
+                    "base_url": "https://gateway.happy-token.cn/v1/",
+                },
+            )
+        ),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": True,
+        "status": "success",
+        "user_id": "newapi-user-id",
+        "token_id": "newapi-token-id",
+        "token": "sk-user-token",
+        "base_url": "https://gateway.happy-token.cn/v1",
+        "management_url": "https://gateway.happy-token.cn/manage",
+    }
+
+
+def test_newapi_binding_non_200_failure_is_redacted():
+    session = FakeSession(
+        FakeResponse(
+            500,
+            {"ok": False, "message": "secret=provision-secret token=sk-upstream-token"},
+            text='{"message":"secret=provision-secret token=sk-upstream-token"}',
+        )
+    )
+    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["http_status"] == 500
+    result_text = str(result)
+    assert "provision-secret" not in result_text
+    assert "sk-upstream-token" not in result_text
