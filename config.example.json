@@ -1,5 +1,4 @@
 {
-  "auth-key": "replace_with_a_strong_secret",
   "registration_enabled": false,
   "image_retention_days": 15,
   "image_access_token_ttl_seconds": 86400,
@@ -15,9 +14,8 @@
   "api_base_url": "",
   "cors_origins": [],
   "session_secret": "replace_with_a_different_strong_session_secret",
-  "session_cookie_name": "happyimage_session",
+  "session_cookie_name": "happytoken_session",
   "session_max_age_seconds": 86400,
-  "default_user_image_quota": 20,
   "sensitive_words": [],
   "global_system_prompt": "",
   "ai_review": {
@@ -33,36 +31,7 @@
     "client_id": "",
     "client_secret": "",
     "scopes": "openid profile email",
-    "allowed_email_domains": "",
-    "default_image_quota": 20
-  },
-  "recharge": {
-    "enabled": false,
-    "provider": "contact",
-    "newapi_base_url": "",
-    "newapi_console_topup_path": "/console/topup",
-    "webhook_secret": "",
-    "quota_per_unit": 1
-  },
-  "backup": {
-    "enabled": false,
-    "provider": "cloudflare_r2",
-    "account_id": "",
-    "access_key_id": "",
-    "secret_access_key": "",
-    "bucket": "",
-    "prefix": "backups",
-    "interval_minutes": 1440,
-    "rotation_keep": 10,
-    "encrypt": false,
-    "passphrase": "",
-    "include": {
-      "config": true,
-      "logs": true,
-      "image_tasks": true,
-      "auth_keys_snapshot": true,
-      "images": false
-    }
+    "allowed_email_domains": ""
   },
   "image_parallel_generation": true,
   "image_poll_interval_secs": 10,
@@ -73,23 +42,11 @@
     "webdav_url": "",
     "webdav_username": "",
     "webdav_password": "",
-    "webdav_root_path": "happyimage/images",
+    "webdav_root_path": "happytoken/images",
     "public_base_url": ""
   },
   "image_min_free_mb": 500,
-  "chat_completion_cache": {
-    "enabled": true,
-    "ttl_seconds": 60,
-    "max_entries": 256,
-    "dedupe_inflight": true,
-    "stream_cache": true,
-    "normalize_messages": true,
-    "drop_adjacent_duplicates": true,
-    "drop_assistant_history": false
-  },
   "image_settle_enabled": false,
   "image_check_before_hit_enabled": false,
-  "image_settle_secs": 2,
-  "auto_relogin_after_refresh": false,
-  "image_timeout_retry_secs": 30
+  "image_settle_secs": 2
 }

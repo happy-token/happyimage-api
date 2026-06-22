@@ -1,4 +1,4 @@
-"""OIDC login routes for HappyImage web user authentication.
+"""OIDC login routes for Happy Token web user authentication.
 
 These routes handle the OIDC authorize redirect and callback flow.
 They are separate from the OpenAI account OAuth import flow under
@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from services.auth_service import auth_service
 from services.config import config
+from services import model_gateway_service
 from services.oidc_service import OIDCError, oidc_service
 from services.web_session_service import web_session_service
 from api.support import resolve_identity_for_request
@@ -97,9 +98,7 @@ def create_router() -> APIRouter:
                 status_code=400, detail={"error": str(exc)}
             ) from exc
 
-        # Find or create the HappyImage user bound to this OIDC identity
-        oidc_settings = config.get_oidc_settings()
-        default_quota = int(oidc_settings.get("default_image_quota") or config.default_user_image_quota)
+        # Find or create the Happy Token user bound to this OIDC identity
         try:
             user_item = await run_in_threadpool(
                 auth_service.find_or_create_oidc_user,
@@ -107,7 +106,6 @@ def create_router() -> APIRouter:
                 auth_subject=oidc_claims["sub"],
                 email=oidc_claims.get("email", ""),
                 name=oidc_claims.get("name", ""),
-                default_image_quota=default_quota,
             )
         except ValueError as exc:
             raise HTTPException(
@@ -119,10 +117,15 @@ def create_router() -> APIRouter:
             "id": user_item.get("id", ""),
             "name": user_item.get("name", ""),
             "role": user_item.get("role", "user"),
-            "image_quota": user_item.get("image_quota"),
             "watermark_label": user_item.get("watermark_label") or "",
             "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
+            "model_provider": user_item.get("model_provider") or "",
+            "model_base_url": user_item.get("model_base_url") or "",
+            "model_api_key_configured": bool(user_item.get("model_api_key_configured")),
+            "model_providers": user_item.get("model_providers") if isinstance(user_item.get("model_providers"), list) else [],
+            "preferences": user_item.get("preferences") if isinstance(user_item.get("preferences"), dict) else {},
         }
+        identity.update(auth_service.get_model_gateway_config(str(user_item.get("id") or "")))
         for key in ("auth_provider", "auth_subject", "email"):
             value = str(user_item.get(key) or "").strip()
             if value:
@@ -151,15 +154,6 @@ def create_router() -> APIRouter:
         # Verify the user still exists and is enabled
         user_id = str(identity.get("id") or "")
         user_item = auth_service.get_key(user_id)
-        if user_item is None and user_id == "admin" and identity.get("role") == "admin" and config.auth_key:
-            user_item = {
-                "id": "admin",
-                "name": "管理员",
-                "role": "admin",
-                "enabled": True,
-                "watermark_label": "",
-                "watermark_unlocked": True,
-            }
         if user_item is None:
             raise HTTPException(
                 status_code=401, detail={"error": "账号不存在"}
@@ -174,10 +168,21 @@ def create_router() -> APIRouter:
             "id": user_item.get("id", ""),
             "name": user_item.get("name", ""),
             "role": user_item.get("role", "user"),
-            "image_quota": user_item.get("image_quota"),
             "watermark_label": user_item.get("watermark_label") or "",
             "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
+            "model_provider": user_item.get("model_provider") or "",
+            "model_base_url": user_item.get("model_base_url") or "",
+            "model_api_key_configured": bool(user_item.get("model_api_key_configured")),
+            "model_providers": user_item.get("model_providers") if isinstance(user_item.get("model_providers"), list) else [],
+            "preferences": (
+                user_item.get("preferences")
+                if isinstance(user_item.get("preferences"), dict) and user_item.get("preferences")
+                else identity.get("preferences")
+                if isinstance(identity.get("preferences"), dict)
+                else {}
+            ),
         }
+        identity.update(auth_service.get_model_gateway_config(user_id))
         for key in ("auth_provider", "auth_subject", "email"):
             value = str(user_item.get(key) or "").strip()
             if value:
@@ -186,9 +191,14 @@ def create_router() -> APIRouter:
         role = "admin" if identity.get("role") == "admin" else "user"
         subject_id = str(identity.get("id") or "").strip() or role
         name = str(identity.get("name") or "").strip() or ("管理员" if role == "admin" else "创作者")
-        image_quota = identity.get("image_quota") if role == "user" else None
         watermark_label = str(identity.get("watermark_label") or "").strip()
         watermark_unlocked = role == "admin" or bool(identity.get("watermark_unlocked", False))
+        model_provider = str(identity.get("model_provider") or "").strip()
+        model_base_url = str(identity.get("model_base_url") or "").strip().rstrip("/")
+        model_api_key_configured = bool(identity.get("model_api_key_configured")) or bool(str(identity.get("model_api_key") or "").strip())
+        model_gateway_enabled = model_gateway_service.is_enabled(model_base_url, str(identity.get("model_api_key") or ""))
+        model_providers = identity.get("model_providers") if isinstance(identity.get("model_providers"), list) else []
+        preferences = identity.get("preferences") if isinstance(identity.get("preferences"), dict) else {}
         external_identity = {
             key: str(identity.get(key) or "").strip()
             for key in ("auth_provider", "auth_subject", "email")
@@ -200,17 +210,27 @@ def create_router() -> APIRouter:
             "role": role,
             "subject_id": subject_id,
             "name": name,
-            "image_quota": image_quota,
             "watermark_label": watermark_label,
             "watermark_unlocked": watermark_unlocked,
+            "model_provider": model_provider,
+            "model_base_url": model_base_url,
+            "model_api_key_configured": model_api_key_configured,
+            "model_gateway_enabled": model_gateway_enabled,
+            "model_providers": model_providers,
+            "preferences": preferences,
             **external_identity,
             "user": {
                 "id": subject_id,
                 "name": name,
                 "role": role,
-                "image_quota": image_quota,
                 "watermark_label": watermark_label,
                 "watermark_unlocked": watermark_unlocked,
+                "model_provider": model_provider,
+                "model_base_url": model_base_url,
+                "model_api_key_configured": model_api_key_configured,
+                "model_gateway_enabled": model_gateway_enabled,
+                "model_providers": model_providers,
+                "preferences": preferences,
                 **external_identity,
             },
         }

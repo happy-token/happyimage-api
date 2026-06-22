@@ -17,10 +17,9 @@ class ImageGenerationTaskRequest(BaseModel):
     model: str = "gpt-image-2"
     size: str | None = None
     quality: str = "auto"
-
-
-class ResumePollRequest(BaseModel):
-    extra_timeout_secs: float = Field(default=30.0, ge=5.0, le=120.0)
+    client_conversation_id: str | None = None
+    client_turn_id: str | None = None
+    client_image_id: str | None = None
 
 
 class ImageFeedbackRequest(BaseModel):
@@ -30,6 +29,21 @@ class ImageFeedbackRequest(BaseModel):
 
 def _parse_task_ids(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def prompt_requires_reference_image(prompt: str) -> bool:
+    import re
+
+    normalized = str(prompt or "").strip()
+    return any(
+        re.search(pattern, normalized, re.IGNORECASE)
+        for pattern in (
+            r"\b(attached|uploaded|source)\s+(image|photo|picture|face|portrait)\b",
+            r"\b(this|that|the)\s+(image|photo|picture)\b",
+            r"\b(image|photo|picture|face|portrait)\s+(?:as|for|from|with)\s+(?:a\s+|the\s+)?(?:facial\s+|face\s+|identity\s+)?reference\b",
+            r"参考图|上传(?:的)?(?:图片|照片)|源图|原图|这张图|该图片|以.*(?:图片|照片).*参考|参考.*(?:图片|照片)",
+        )
+    )
 
 
 async def filter_or_log(call: LoggedCall, text: str) -> None:
@@ -59,6 +73,11 @@ def create_router() -> APIRouter:
         authorization: str | None = Header(default=None),
     ):
         identity = require_identity(authorization, request)
+        if prompt_requires_reference_image(body.prompt):
+            raise HTTPException(
+                status_code=400,
+                detail={"error": "请先上传参考图，包含参考图要求的提示词需要使用图生图。"},
+            )
         await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations", body.model, "文生图任务", request_text=body.prompt), body.prompt)
         try:
             return await run_in_threadpool(
@@ -70,6 +89,9 @@ def create_router() -> APIRouter:
                 size=body.size,
                 quality=body.quality,
                 base_url=resolve_image_base_url(request),
+                client_conversation_id=body.client_conversation_id or "",
+                client_turn_id=body.client_turn_id or "",
+                client_image_id=body.client_image_id or "",
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
@@ -99,24 +121,9 @@ def create_router() -> APIRouter:
                 quality=payload["quality"],
                 base_url=resolve_image_base_url(request),
                 images=images,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-
-    @router.post("/api/image-tasks/{task_id}/resume-poll")
-    async def resume_image_poll(
-        task_id: str,
-        body: ResumePollRequest,
-        request: Request,
-        authorization: str | None = Header(default=None),
-    ):
-        identity = require_identity(authorization, request)
-        try:
-            return await run_in_threadpool(
-                image_task_service.resume_poll,
-                identity,
-                task_id,
-                body.extra_timeout_secs,
+                client_conversation_id=str(payload.get("client_conversation_id") or ""),
+                client_turn_id=str(payload.get("client_turn_id") or ""),
+                client_image_id=str(payload.get("client_image_id") or ""),
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc

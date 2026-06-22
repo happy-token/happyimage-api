@@ -13,7 +13,7 @@ from services.image_storage_service import ImageStorageService
 
 
 def png_bytes() -> bytes:
-    path = Path(tempfile.gettempdir()) / "HappyImage-test-image.png"
+    path = Path(tempfile.gettempdir()) / "Happy Token-test-image.png"
     Image.new("RGB", (2, 2), color=(255, 0, 0)).save(path, format="PNG")
     return path.read_bytes()
 
@@ -38,8 +38,8 @@ class FakeWebDAVClient:
         return True
 
     def test(self) -> dict[str, object]:
-        self.put(".happyimage_webdav_test.txt", b"happyimage webdav test\n")
-        self.delete(".happyimage_webdav_test.txt")
+        self.put(".happytoken_webdav_test.txt", b"happytoken webdav test\n")
+        self.delete(".happytoken_webdav_test.txt")
         return {"ok": True, "status": 200, "error": None}
 
 
@@ -55,7 +55,7 @@ class ImageStorageServiceTests(unittest.TestCase):
             "webdav_url": "",
             "webdav_username": "",
             "webdav_password": "",
-            "webdav_root_path": "HappyImage/images",
+            "webdav_root_path": "Happy Token/images",
             "public_base_url": "",
         }
         self.config_patcher = mock.patch("services.image_storage_service.config")
@@ -179,7 +179,7 @@ class ImageStorageServiceTests(unittest.TestCase):
             result = self.service().test_webdav()
 
         self.assertTrue(result["ok"])
-        self.assertIn(".happyimage_webdav_test.txt", FakeWebDAVClient.deleted)
+        self.assertIn(".happytoken_webdav_test.txt", FakeWebDAVClient.deleted)
 
     def test_download_zip_includes_remote_only_images(self):
         rel = "2026/06/19/remote.png"

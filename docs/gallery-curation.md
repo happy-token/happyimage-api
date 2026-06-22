@@ -6,10 +6,10 @@
 
 | 来源 | 路径 | 说明 |
 |:--|:--|:--|
-| 种子图库 | `~/workspace/HappyImage/happyimage-gallery-source/image-gallery-seed/` | 源数据目录，用于导出 web 静态图库包 |
+| 种子图库 | `~/workspace/Happy Token/happytoken-gallery-source/image-gallery-seed/` | 源数据目录，用于导出 web 静态图库包 |
 | 候选图库 | `data/image-gallery-candidates/` | 外部采集的大规模图库，需手动同步 |
 
-种子索引文件: `~/workspace/HappyImage/happyimage-gallery-source/image-gallery-seed/records/evolink_cases.json`
+种子索引文件: `~/workspace/Happy Token/happytoken-gallery-source/image-gallery-seed/records/evolink_cases.json`
 
 ## 分类规则
 

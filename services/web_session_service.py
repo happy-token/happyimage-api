@@ -1,4 +1,4 @@
-"""Signed web session service for HappyImage browser sessions.
+"""Signed web session service for Happy Token browser sessions.
 
 Creates and validates stateless signed session tokens stored in HttpOnly
 cookies. Sessions contain the user identity needed by auth checks without
@@ -40,7 +40,7 @@ class WebSessionService:
     def _secret(self) -> str:
         secret = config.session_secret
         if not secret:
-            raise WebSessionError("HAPPYIMAGE_SESSION_SECRET 未配置")
+            raise WebSessionError("HAPPYTOKEN_SESSION_SECRET 未配置")
         return secret
 
     @property
@@ -62,7 +62,6 @@ class WebSessionService:
             "sub": str(identity.get("id") or ""),
             "name": str(identity.get("name") or ""),
             "role": str(identity.get("role") or "user"),
-            "image_quota": identity.get("image_quota"),
             "iat": now,
             "exp": now + self.max_age,
         }
@@ -140,9 +139,6 @@ class WebSessionService:
             "role": role,
         }
         if role == "user":
-            quota = session_payload.get("image_quota")
-            if quota is not None:
-                identity["image_quota"] = quota
             for key in ("auth_provider", "auth_subject", "email"):
                 value = str(session_payload.get(key) or "").strip()
                 if value:
@@ -177,7 +173,10 @@ class WebSessionService:
             "HttpOnly",
             "Path=/",
             "Max-Age=0",
+            "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
         ]
+        if config.api_base_url.startswith("https://"):
+            parts.append("Secure")
         frontend = config.frontend_base_url
         if frontend and not frontend.startswith("http://127.") and not frontend.startswith("http://localhost"):
             parts.append("SameSite=None")

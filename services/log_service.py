@@ -15,12 +15,10 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from services.config import DATA_DIR
-from services.protocol.error_response import anthropic_error_response, openai_error_response
 from utils.helper import anthropic_sse_stream, sse_json_stream
 
 LOG_TYPE_CALL = "call"
 LOG_TYPE_ACCOUNT = "account"
-LOG_TYPE_USER_QUOTA = "user_quota"
 INTERNAL_RESPONSE_KEYS = {"_account_email", "_conversation_id"}
 
 
@@ -181,31 +179,17 @@ def _request_excerpt(text: object, limit: int = 1000) -> str:
 
 
 def _image_error_response(exc: Exception) -> JSONResponse:
-    from services.protocol.conversation import public_image_error_message
-
-    message = public_image_error_message(str(exc))
-    if "no available image quota" in message.lower():
-        return openai_error_response(
-            {
-                "error": {
-                    "message": "no available image quota",
-                    "type": "insufficient_quota",
-                    "param": None,
-                    "code": "insufficient_quota",
-                }
-            },
-            429,
-        )
+    message = str(exc) or "image generation failed"
     if hasattr(exc, "to_openai_error") and hasattr(exc, "status_code"):
         return JSONResponse(status_code=int(exc.status_code), content=exc.to_openai_error())
-    return openai_error_response(message, 502)
+    return JSONResponse(status_code=502, content={"error": {"message": message, "type": "upstream_error"}})
 
 
 def _protocol_error_response(exc: Exception, status_code: int, sse: str) -> JSONResponse:
     message = str(exc)
     if sse == "anthropic":
-        return anthropic_error_response(message, status_code)
-    return openai_error_response(message, status_code)
+        return JSONResponse(status_code=status_code, content={"type": "error", "error": {"message": message}})
+    return JSONResponse(status_code=status_code, content={"error": {"message": message}})
 
 
 def _next_item(items):
@@ -226,14 +210,8 @@ class LoggedCall:
     request_shape: dict[str, int] | None = None
 
     async def run(self, handler, *args, sse: str = "openai"):
-        from services.protocol.conversation import ImageGenerationError
-
         try:
             result = await run_in_threadpool(handler, *args)
-        except ImageGenerationError as exc:
-            self.log("调用失败", status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
-                     conversation_id=getattr(exc, "conversation_id", ""))
-            return _image_error_response(exc)
         except HTTPException as exc:
             self.log("调用失败", status="failed", error=str(exc.detail))
             raise
@@ -252,10 +230,6 @@ class LoggedCall:
         sender = anthropic_sse_stream if sse == "anthropic" else sse_json_stream
         try:
             has_first, first = await run_in_threadpool(_next_item, result)
-        except ImageGenerationError as exc:
-            self.log("调用失败", status="failed", error=str(exc), account_email=getattr(exc, "account_email", ""),
-                     conversation_id=getattr(exc, "conversation_id", ""))
-            return _image_error_response(exc)
         except HTTPException as exc:
             self.log("调用失败", status="failed", error=str(exc.detail))
             raise
@@ -291,9 +265,7 @@ class LoggedCall:
                 conversation_id=(conversation_ids[0] if conversation_ids else getattr(exc, "conversation_id", "")),
             )
             if self.endpoint.startswith("/v1/images") and not hasattr(exc, "to_openai_error"):
-                from services.protocol.conversation import ImageGenerationError, public_image_error_message
-
-                raise ImageGenerationError(public_image_error_message(str(exc))) from exc
+                raise RuntimeError(str(exc) or "image generation failed") from exc
             raise
         finally:
             if not failed:
@@ -333,6 +305,6 @@ class LoggedCall:
         if conv_id:
             detail["conversation_id"] = conv_id
         collected_urls = [*(urls or []), *_collect_urls(result)]
-        if collected_urls and not self.endpoint.startswith("/v1/search"):
+        if collected_urls:
             detail["urls"] = list(dict.fromkeys(collected_urls))
         log_service.add(LOG_TYPE_CALL, f"{self.summary}{suffix}", detail)

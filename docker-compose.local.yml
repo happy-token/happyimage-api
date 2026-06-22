@@ -2,17 +2,17 @@
 # 使用方式：docker compose -f docker-compose.local.yml up -d --build
 #
 # 这个配置只启动后端 API 服务，不包含 Web 面板。
-# 需要 Web 面板时，使用 docker-compose.yml 或直接从 happyimage-web 仓库部署前端。
+# 需要 Web 面板时，使用 docker-compose.yml 或直接从 happytoken-web 仓库部署前端。
 
 services:
-  happyimage-api:
+  happytoken-api:
     build:
       context: .
       dockerfile: Dockerfile
       args:
-        PYTHON_IMAGE: ${HAPPYIMAGE_PYTHON_IMAGE:-python:3.13-slim}
-    image: happyimage-api:local
-    container_name: happyimage-api-local
+        PYTHON_IMAGE: ${HAPPYTOKEN_PYTHON_IMAGE:-python:3.13-slim}
+    image: happytoken-api:local
+    container_name: happytoken-api-local
     restart: unless-stopped
     ports:
       - "8000:80"
@@ -20,26 +20,22 @@ services:
       - ./data:/app/data
       - ./config.json:/app/config.json:rw
     environment:
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-sqlite}
-      DATABASE_URL: ${DATABASE_URL:-sqlite:////app/data/accounts.db}
-      HAPPYIMAGE_AUTH_KEY: ${HAPPYIMAGE_AUTH_KEY:-}
-      HAPPYIMAGE_BASE_URL: ${HAPPYIMAGE_BASE_URL:-}
-      HAPPYIMAGE_REGISTRATION_ENABLED: ${HAPPYIMAGE_REGISTRATION_ENABLED:-true}
-      HAPPYIMAGE_MODEL_GATEWAY_BASE_URL: ${HAPPYIMAGE_MODEL_GATEWAY_BASE_URL:-}
-      HAPPYIMAGE_MODEL_GATEWAY_API_KEY: ${HAPPYIMAGE_MODEL_GATEWAY_API_KEY:-}
-      HAPPYIMAGE_REQUIRE_MODEL_GATEWAY: ${HAPPYIMAGE_REQUIRE_MODEL_GATEWAY:-false}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-postgres}
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required when STORAGE_BACKEND=postgres}
+      HAPPYTOKEN_AUTH_KEY: ${HAPPYTOKEN_AUTH_KEY:-}
+      HAPPYTOKEN_BASE_URL: ${HAPPYTOKEN_BASE_URL:-}
+      HAPPYTOKEN_REGISTRATION_ENABLED: ${HAPPYTOKEN_REGISTRATION_ENABLED:-true}
 
-      HAPPYIMAGE_SESSION_SECRET: ${HAPPYIMAGE_SESSION_SECRET:-}
-      HAPPYIMAGE_FRONTEND_BASE_URL: ${HAPPYIMAGE_FRONTEND_BASE_URL:-http://localhost:3000}
-      HAPPYIMAGE_API_BASE_URL: ${HAPPYIMAGE_API_BASE_URL:-http://localhost:8000}
+      HAPPYTOKEN_SESSION_SECRET: ${HAPPYTOKEN_SESSION_SECRET:-}
+      HAPPYTOKEN_FRONTEND_BASE_URL: ${HAPPYTOKEN_FRONTEND_BASE_URL:-http://localhost:3000}
+      HAPPYTOKEN_API_BASE_URL: ${HAPPYTOKEN_API_BASE_URL:-http://localhost:8000}
 
-      HAPPYIMAGE_OIDC_ENABLED: ${HAPPYIMAGE_OIDC_ENABLED:-}
-      HAPPYIMAGE_OIDC_ISSUER: ${HAPPYIMAGE_OIDC_ISSUER:-}
-      HAPPYIMAGE_OIDC_CLIENT_ID: ${HAPPYIMAGE_OIDC_CLIENT_ID:-}
-      HAPPYIMAGE_OIDC_CLIENT_SECRET: ${HAPPYIMAGE_OIDC_CLIENT_SECRET:-}
-      HAPPYIMAGE_OIDC_SCOPES: ${HAPPYIMAGE_OIDC_SCOPES:-openid profile email}
-      HAPPYIMAGE_OIDC_ALLOWED_EMAIL_DOMAINS: ${HAPPYIMAGE_OIDC_ALLOWED_EMAIL_DOMAINS:-}
-      HAPPYIMAGE_OIDC_DEFAULT_IMAGE_QUOTA: ${HAPPYIMAGE_OIDC_DEFAULT_IMAGE_QUOTA:-0}
+      HAPPYTOKEN_OIDC_ENABLED: ${HAPPYTOKEN_OIDC_ENABLED:-}
+      HAPPYTOKEN_OIDC_ISSUER: ${HAPPYTOKEN_OIDC_ISSUER:-}
+      HAPPYTOKEN_OIDC_CLIENT_ID: ${HAPPYTOKEN_OIDC_CLIENT_ID:-}
+      HAPPYTOKEN_OIDC_CLIENT_SECRET: ${HAPPYTOKEN_OIDC_CLIENT_SECRET:-}
+      HAPPYTOKEN_OIDC_SCOPES: ${HAPPYTOKEN_OIDC_SCOPES:-openid profile email}
+      HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS: ${HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/health?format=json', timeout=3).read()"]
       interval: 30s

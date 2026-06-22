@@ -4,26 +4,26 @@
 services:
   postgres:
     image: postgres:17
-    container_name: happyimage-postgres
+    container_name: happytoken-postgres
     restart: unless-stopped
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_USER: happyimage
-      POSTGRES_PASSWORD: happyimage-local-dev
-      POSTGRES_DB: happyimage
+      POSTGRES_USER: happytoken
+      POSTGRES_PASSWORD: happytoken-local-dev
+      POSTGRES_DB: happytoken
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U happyimage -d happyimage"]
+      test: ["CMD-SHELL", "pg_isready -U happytoken -d happytoken"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
 
-  happyimage-api:
-    image: happyimage-api:local
-    container_name: happyimage-api-test
+  happytoken-api:
+    image: happytoken-api:local
+    container_name: happytoken-api-test
     restart: unless-stopped
     ports:
       - "8000:80"
@@ -32,12 +32,12 @@ services:
       - ./config.json:/app/config.json:rw
     environment:
       STORAGE_BACKEND: postgres
-      DATABASE_URL: "postgresql://happyimage:happyimage-local-dev@postgres:5432/happyimage"
-      HAPPYIMAGE_SESSION_SECRET: "local-test-secret-do-not-use-in-prod"
-      HAPPYIMAGE_FRONTEND_BASE_URL: "http://localhost:3000"
-      HAPPYIMAGE_API_BASE_URL: "http://localhost:8000"
-      HAPPYIMAGE_CORS_ORIGINS: "http://localhost:3000"
-      HAPPYIMAGE_REGISTRATION_ENABLED: "true"
+      DATABASE_URL: "postgresql://happytoken:happytoken-local-dev@postgres:5432/happytoken"
+      HAPPYTOKEN_SESSION_SECRET: "local-test-secret-do-not-use-in-prod"
+      HAPPYTOKEN_FRONTEND_BASE_URL: "http://localhost:3000"
+      HAPPYTOKEN_API_BASE_URL: "http://localhost:8000"
+      HAPPYTOKEN_CORS_ORIGINS: "http://localhost:3000"
+      HAPPYTOKEN_REGISTRATION_ENABLED: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,16 +48,16 @@ services:
       retries: 3
       start_period: 10s
 
-  happyimage-web:
-    image: happyimage-web:local
-    container_name: happyimage-web-test
+  happytoken-web:
+    image: happytoken-web:local
+    container_name: happytoken-web-test
     restart: unless-stopped
     ports:
       - "3000:80"
     environment:
       NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
     depends_on:
-      happyimage-api:
+      happytoken-api:
         condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]

@@ -9,7 +9,7 @@ import requests
 
 from utils.helper import save_images_from_text
 
-AUTH_KEY = "happyimage"
+AUTH_KEY = "happytoken"
 BASE_URL = "http://localhost:8000"
 
 pytestmark = pytest.mark.live

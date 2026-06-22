@@ -35,14 +35,14 @@ Use this format:
 **Root Cause**
 - NewAPI returned `data[].url` pointing at an upstream temporary image host.
 - The browser and local server could not reliably fetch that host; one direct probe failed with TLS, and older historical links later returned 401.
-- HappyImage stored and replayed that upstream URL directly, so the UI depended on an external temporary image host instead of HappyImage storage.
+- Happy Token stored and replayed that upstream URL directly, so the UI depended on an external temporary image host instead of Happy Token storage.
 
 **Fix**
 - `services/image_task_service.py`
   - Added gateway output materialization.
-  - For gateway `data[].url`, HappyImage downloads the image and saves it through `image_storage_service.save`.
-  - For gateway `data[].b64_json`, HappyImage decodes and saves it through the same storage path.
-  - Public task data now returns HappyImage `/images/...` URLs and preserves the original upstream URL as `source_url`.
+  - For gateway `data[].url`, Happy Token downloads the image and saves it through `image_storage_service.save`.
+  - For gateway `data[].b64_json`, Happy Token decodes and saves it through the same storage path.
+  - Public task data now returns Happy Token `/images/...` URLs and preserves the original upstream URL as `source_url`.
 - `test/test_image_task_service.py`
   - Added coverage for remote gateway URL materialization.
 
@@ -62,14 +62,14 @@ Use this format:
 - Reloading the page did not update the visible historical result.
 
 **Root Cause**
-- `happyimage-web` restored image conversations from localforage.
+- `happytoken-web` restored image conversations from localforage.
 - History sync only fetched backend tasks for images in `loading` or selected `error` states.
 - Images already marked `success` were skipped, so stale successful images kept their old remote URL forever.
 
 **Fix**
-- `happyimage-web/src/app/image/page.tsx`
+- `happytoken-web/src/app/image/page.tsx`
   - `syncConversationImageTasks` now fetches backend task state for every image with `taskId`, not only `loading` / `error` images.
-  - Successful images can now receive refreshed URLs, feedback, duration, and task metadata from HappyImage API.
+  - Successful images can now receive refreshed URLs, feedback, duration, and task metadata from Happy Token API.
 
 **Verification**
 - `pnpm run test:unit`
@@ -89,9 +89,9 @@ Use this format:
 - Web development defaults previously fell back to `http://127.0.0.1:8000`, which made this mistake easy.
 
 **Fix**
-- `happyimage-web/src/constants/common-env.ts`
+- `happytoken-web/src/constants/common-env.ts`
   - Default `apiUrl` is now empty, so browser calls use relative same-origin paths by default.
-- `happyimage-web/README.md`
+- `happytoken-web/README.md`
   - Documents that same-origin proxy mode should leave `NEXT_PUBLIC_API_BASE_URL` empty.
   - Documents `BACKEND_URL` for app routes and `MODEL_BACKEND_URL` / `MODEL_BACKEND_API_KEY` for model routes.
 
@@ -126,17 +126,17 @@ Use this format:
   - no raw `model_gateway_api_key`.
 - `uv run pytest -q test/test_config.py`
 
-## 2026-06-21 - Required Model Gateway Should Not Fall Back Silently
+## 2026-06-21 - User Provider Gateway Should Not Fall Back Silently
 
 **Symptoms**
-- After moving account pool and reverse-engineered GPT image calls out to NewAPI, HappyImage should not silently fall back to local account-pool generation when gateway config is missing.
+- After moving account pool and reverse-engineered GPT image calls out to NewAPI, Happy Token should not silently fall back to local account-pool generation or server `.env` gateway credentials when the current user has not configured a provider.
 
 **Root Cause**
-- Image tasks could still use local handlers when the model gateway was not configured, even in deployments intended to depend on NewAPI.
+- Image tasks could still use local handlers or server-level gateway configuration instead of the current user's selected provider.
 
 **Fix**
-- Added `HAPPYIMAGE_REQUIRE_MODEL_GATEWAY=true`.
-- `services/model_gateway_service.py` raises a clear configuration error when required gateway config is missing.
+- Image tasks now require the current user's selected provider Base URL and API Key.
+- `services/model_gateway_service.py` raises a clear configuration error when the user provider is missing.
 - `/api/image-tasks/*` persists the failure as a restorable error task instead of leaving the UI ambiguous.
 
 **Verification**
@@ -152,7 +152,7 @@ Use this format:
 - Web middleware originally joined base URL and request path without checking whether the base already ended in `/v1`.
 
 **Fix**
-- `happyimage-web/src/middleware.ts`
+- `happytoken-web/src/middleware.ts`
   - `buildProxyUrl` strips the incoming `/v1` prefix when `MODEL_BACKEND_URL` already ends with `/v1`.
   - `/v1/*` proxy requests use an allowlisted header set and inject `MODEL_BACKEND_API_KEY` server-side.
 
@@ -171,13 +171,13 @@ Use this format:
 - That made API own both product state and public static gallery assets.
 
 **Fix**
-- `happyimage-web` now prefers a static gallery package at `public/seed-gallery/static/items.json`.
+- `happytoken-web` now prefers a static gallery package at `public/seed-gallery/static/items.json`.
 - Static image URLs use `/seed-gallery/images/*` and `/seed-gallery/thumbnails/w640/*`.
 - If the static package is absent, web falls back to the existing `/api/seed-gallery/*` compatibility endpoints.
 - API Docker no longer copies `data/image-gallery-seed` or initializes seed gallery data on startup.
 - Added `scripts/export_seed_gallery_static.py` to export normalized gallery JSON and optionally copy assets.
 
 **Verification**
-- `uv run python scripts/export_seed_gallery_static.py --output ../happyimage-web/public/seed-gallery`
+- `uv run python scripts/export_seed_gallery_static.py --output ../happytoken-web/public/seed-gallery`
 - Exported 3427 items and rewrote image URLs to `/seed-gallery/*`.
 - Generated static files are ignored by git and were removed after verification to keep local fallback behavior unchanged.

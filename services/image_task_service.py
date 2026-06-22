@@ -9,13 +9,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from services.auth_service import auth_service
 from services.config import DATA_DIR, config
 from services.content_filter import request_text
 from services.image_storage_service import image_storage_service
 from services.image_task_store import ImageTaskStore, JSONImageTaskStore, create_image_task_store
 from services.log_service import LOG_TYPE_CALL, log_service
-from services.protocol import openai_v1_image_edit, openai_v1_image_generations
 
 TASK_STATUS_QUEUED = "queued"
 TASK_STATUS_RUNNING = "running"
@@ -49,6 +47,18 @@ def _clean(value: object, default: str = "") -> str:
 
 def _owner_id(identity: dict[str, object]) -> str:
     return _clean(identity.get("id")) or "anonymous"
+
+
+def _identity_model_gateway(identity: dict[str, object]) -> dict[str, object]:
+    base_url = _clean(identity.get("model_base_url")).rstrip("/")
+    api_key = _clean(identity.get("model_api_key"))
+    if not base_url or not api_key:
+        return {}
+    return {
+        "model_gateway_provider": _clean(identity.get("model_provider")) or "newapi",
+        "model_gateway_base_url": base_url,
+        "model_gateway_api_key": api_key,
+    }
 
 
 def _task_key(owner_id: str, task_id: str) -> str:
@@ -157,6 +167,12 @@ def _public_task(task: dict[str, Any]) -> dict[str, Any]:
         item["prompt"] = task.get("prompt")
     if task.get("conversation_id"):
         item["conversation_id"] = task.get("conversation_id")
+    if task.get("client_conversation_id"):
+        item["client_conversation_id"] = task.get("client_conversation_id")
+    if task.get("client_turn_id"):
+        item["client_turn_id"] = task.get("client_turn_id")
+    if task.get("client_image_id"):
+        item["client_image_id"] = task.get("client_image_id")
     if task.get("data") is not None:
         data = task.get("data")
         if isinstance(data, list):
@@ -198,8 +214,8 @@ class ImageTaskService:
         self,
         path: Path,
         *,
-        generation_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_generations.handle,
-        edit_handler: Callable[[dict[str, Any]], dict[str, Any]] = openai_v1_image_edit.handle,
+        generation_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
+        edit_handler: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         retention_days_getter: Callable[[], int] | None = None,
         task_store: ImageTaskStore | None = None,
     ):
@@ -230,6 +246,9 @@ class ImageTaskService:
         size: str | None,
         quality: str = "auto",
         base_url: str = "",
+        client_conversation_id: str = "",
+        client_turn_id: str = "",
+        client_image_id: str = "",
     ) -> dict[str, Any]:
         payload = {
             "prompt": prompt,
@@ -240,6 +259,10 @@ class ImageTaskService:
             "response_format": "url",
             "base_url": base_url,
             "owner_id": _owner_id(identity),
+            "client_conversation_id": client_conversation_id,
+            "client_turn_id": client_turn_id,
+            "client_image_id": client_image_id,
+            **_identity_model_gateway(identity),
         }
         return self._submit(identity, client_task_id=client_task_id, mode="generate", payload=payload)
 
@@ -254,6 +277,9 @@ class ImageTaskService:
         quality: str = "auto",
         base_url: str = "",
         images: list[tuple[bytes, str, str]] | None = None,
+        client_conversation_id: str = "",
+        client_turn_id: str = "",
+        client_image_id: str = "",
     ) -> dict[str, Any]:
         payload = {
             "prompt": prompt,
@@ -265,6 +291,10 @@ class ImageTaskService:
             "response_format": "url",
             "base_url": base_url,
             "owner_id": _owner_id(identity),
+            "client_conversation_id": client_conversation_id,
+            "client_turn_id": client_turn_id,
+            "client_image_id": client_image_id,
+            **_identity_model_gateway(identity),
         }
         return self._submit(identity, client_task_id=client_task_id, mode="edit", payload=payload)
 
@@ -360,11 +390,6 @@ class ImageTaskService:
                 if cleaned:
                     self._save_locked()
                 return _public_task(task)
-            quota_reserved = False
-            try:
-                quota_reserved = auth_service.reserve_image_quota(identity, 1)
-            except ValueError as exc:
-                raise ValueError(str(exc)) from exc
             task = {
                 "id": task_id,
                 "owner_id": owner,
@@ -377,15 +402,20 @@ class ImageTaskService:
                 "created_at": now,
                 "updated_at": now,
                 "created_ts": time.time(),
-                "quota_reserved": quota_reserved,
-                "quota_cost": 1,
             }
+            client_conversation_id = _clean(payload.get("client_conversation_id"))
+            client_turn_id = _clean(payload.get("client_turn_id"))
+            client_image_id = _clean(payload.get("client_image_id"))
+            if client_conversation_id:
+                task["client_conversation_id"] = client_conversation_id
+            if client_turn_id:
+                task["client_turn_id"] = client_turn_id
+            if client_image_id:
+                task["client_image_id"] = client_image_id
             try:
                 self._tasks[key] = task
                 self._save_locked()
             except Exception:
-                if quota_reserved:
-                    auth_service.refund_image_quota(identity, 1)
                 self._tasks.pop(key, None)
                 raise
             should_start = True
@@ -394,7 +424,7 @@ class ImageTaskService:
         if should_start:
             thread = threading.Thread(
                 target=self._run_task,
-                args=(key, mode, payload, dict(identity), _clean(payload.get("model"), "gpt-image-2"), quota_reserved),
+                args=(key, mode, payload, dict(identity), _clean(payload.get("model"), "gpt-image-2")),
                 name=f"image-task-{task_id[:16]}",
                 daemon=True,
             )
@@ -408,31 +438,30 @@ class ImageTaskService:
         payload: dict[str, Any],
         identity: dict[str, object],
         model: str,
-        quota_reserved: bool = False,
     ) -> None:
         started = time.time()
         self._update_task(key, status=TASK_STATUS_RUNNING, error="")
+        with self._lock:
+            current_task = dict(self._tasks.get(key) or {})
+        self._update_linked_result(identity, current_task, {"status": "loading", "taskStatus": "running"})
         # 创建进度回调，每个步骤完成后更新任务状态
         def progress_callback(step: str) -> None:
             if step == "image_stream_resolve_start":
                 self._update_task(key, started_ts=time.time())
             self._update_task(key, progress=step)
-        # 将进度回调添加到 payload 中（handler 会提取并传递给 ConversationRequest）
+        # 将进度回调添加到 payload 中，供网关实现按需更新任务状态。
         payload_with_progress = {**payload, "progress_callback": progress_callback}
         try:
             from services import model_gateway_service
 
-            model_gateway_service.ensure_available()
-            gateway_enabled = model_gateway_service.is_enabled()
-            if gateway_enabled:
-                result = (
-                    model_gateway_service.edit_image(payload_with_progress)
-                    if mode == "edit"
-                    else model_gateway_service.generate_image(payload_with_progress)
-                )
-            else:
-                handler = self.edit_handler if mode == "edit" else self.generation_handler
-                result = handler(payload_with_progress)
+            gateway_base_url = _clean(payload_with_progress.get("model_gateway_base_url"))
+            gateway_api_key = _clean(payload_with_progress.get("model_gateway_api_key"))
+            model_gateway_service.ensure_available(gateway_base_url, gateway_api_key)
+            result = (
+                model_gateway_service.edit_image(payload_with_progress)
+                if mode == "edit"
+                else model_gateway_service.generate_image(payload_with_progress)
+            )
             if not isinstance(result, dict):
                 raise RuntimeError("image task returned streaming result unexpectedly")
             data = result.get("data")
@@ -442,20 +471,35 @@ class ImageTaskService:
                 if upstream:
                     message = upstream
                 else:
-                    message = "号池中没有可用账号或所有账号均被限流，请检查号池状态（账号额度、是否被封禁、是否到达生图上限）"
+                    message = "模型供应商没有返回图片结果，请检查用户设置中的 Base URL、API Key 和模型配置"
                 error = RuntimeError(message)
                 if account_email:
                     setattr(error, "account_email", account_email)
                 raise error
-            if gateway_enabled:
-                data = _materialize_gateway_images(
-                    data,
-                    base_url=_clean(payload.get("base_url")),
-                    owner_id=_owner_id(identity),
-                )
+            data = _materialize_gateway_images(
+                data,
+                base_url=_clean(payload.get("base_url")),
+                owner_id=_owner_id(identity),
+            )
             usage = result.get("usage")
             duration_ms = int((time.time() - started) * 1000)
             self._update_task(key, status=TASK_STATUS_SUCCESS, data=data, usage=usage, error="", duration_ms=duration_ms)
+            with self._lock:
+                current_task = dict(self._tasks.get(key) or {})
+            first = data[0] if data and isinstance(data[0], dict) else {}
+            self._update_linked_result(
+                identity,
+                current_task,
+                {
+                    "status": "success",
+                    "taskStatus": None,
+                    "progress": None,
+                    "error": None,
+                    "url": first.get("url"),
+                    "revised_prompt": first.get("revised_prompt"),
+                    "durationMs": duration_ms,
+                },
+            )
             self._log_call(
                 identity,
                 mode,
@@ -467,15 +511,28 @@ class ImageTaskService:
                 account_email=account_email,
             )
         except Exception as exc:
-            if quota_reserved:
-                auth_service.refund_image_quota(identity, 1)
-            error_message = str(exc) or "image task failed"
+            from services.model_gateway_service import humanize_gateway_error
+
+            error_message = humanize_gateway_error(str(exc) or "image task failed")
             account_email = _clean(getattr(exc, "account_email", ""))
             conversation_id = _clean(getattr(exc, "conversation_id", ""))
             duration_ms = int((time.time() - started) * 1000)
             self._update_task(key, status=TASK_STATUS_ERROR, error=error_message, data=[],
                               duration_ms=duration_ms,
                               **({"conversation_id": conversation_id} if conversation_id else {}))
+            with self._lock:
+                current_task = dict(self._tasks.get(key) or {})
+            self._update_linked_result(
+                identity,
+                current_task,
+                {
+                    "status": "error",
+                    "taskStatus": None,
+                    "progress": None,
+                    "error": error_message,
+                    "durationMs": duration_ms,
+                },
+            )
             self._log_call(
                 identity,
                 mode,
@@ -538,6 +595,25 @@ class ImageTaskService:
             task["updated_ts"] = time.time()
             self._save_locked()
 
+    def _conversation_link(self, task: dict[str, Any]) -> tuple[str, str]:
+        return _clean(task.get("client_conversation_id")), _clean(task.get("client_image_id"))
+
+    def _update_linked_result(self, identity: dict[str, object], task: dict[str, Any], updates: dict[str, Any]) -> None:
+        conversation_id, image_id = self._conversation_link(task)
+        if not conversation_id or not image_id:
+            return
+        try:
+            from services.image_conversation_service import image_conversation_service
+
+            image_conversation_service.update_result(
+                identity,
+                conversation_id=conversation_id,
+                image_id=image_id,
+                updates=updates,
+            )
+        except Exception:
+            pass
+
     def _load_locked(self) -> dict[str, dict[str, Any]]:
         raw_items = self.task_store.load_tasks()
         if not raw_items and not isinstance(self.task_store, JSONImageTaskStore) and self.path.exists():
@@ -572,6 +648,18 @@ class ImageTaskService:
                 "started_ts": item.get("started_ts"),
                 "duration_ms": item.get("duration_ms"),
             }
+            conversation_id = _clean(item.get("conversation_id"))
+            client_conversation_id = _clean(item.get("client_conversation_id"))
+            client_turn_id = _clean(item.get("client_turn_id"))
+            client_image_id = _clean(item.get("client_image_id"))
+            if conversation_id:
+                task["conversation_id"] = conversation_id
+            if client_conversation_id:
+                task["client_conversation_id"] = client_conversation_id
+            if client_turn_id:
+                task["client_turn_id"] = client_turn_id
+            if client_image_id:
+                task["client_image_id"] = client_image_id
             data = item.get("data")
             if isinstance(data, list):
                 task["data"] = data
@@ -607,9 +695,21 @@ class ImageTaskService:
         changed = False
         for task in self._tasks.values():
             if task.get("status") in UNFINISHED_STATUSES:
+                error_message = "服务已重启，未完成的图片任务已中断"
                 task["status"] = TASK_STATUS_ERROR
-                task["error"] = "服务已重启，未完成的图片任务已中断"
+                task["error"] = error_message
                 task["updated_at"] = _now_iso()
+                task["updated_ts"] = time.time()
+                self._update_linked_result(
+                    {"id": task.get("owner_id") or "anonymous"},
+                    task,
+                    {
+                        "status": "error",
+                        "taskStatus": None,
+                        "progress": None,
+                        "error": error_message,
+                    },
+                )
                 changed = True
         return changed
 
@@ -627,122 +727,5 @@ class ImageTaskService:
         for key in removed_keys:
             self._tasks.pop(key, None)
         return bool(removed_keys)
-
-    def resume_poll(
-        self,
-        identity: dict[str, object],
-        task_id: str,
-        extra_timeout_secs: float = 30.0,
-    ) -> dict[str, Any]:
-        """恢复对已超时任务的轮询，额外等待 extra_timeout_secs 秒。"""
-        owner = _owner_id(identity)
-        key = _task_key(owner, _clean(task_id))
-        with self._lock:
-            task = self._tasks.get(key)
-            if task is None:
-                raise ValueError("task not found")
-            if task.get("status") != TASK_STATUS_ERROR:
-                raise ValueError("task is not in error state")
-            error_msg = _clean(task.get("error"))
-            if "超时" not in error_msg:
-                raise ValueError("task error is not a timeout error")
-            conversation_id = _clean(task.get("conversation_id"))
-            if not conversation_id:
-                raise ValueError("task has no conversation_id")
-            mode = task.get("mode", "generate")
-            model = task.get("model", "gpt-image-2")
-            quota_reserved = False
-            try:
-                quota_reserved = auth_service.reserve_image_quota(identity, 1)
-            except ValueError as exc:
-                raise ValueError(str(exc)) from exc
-            # 将任务状态重置为 running
-            self._update_task(key, status=TASK_STATUS_RUNNING, error="")
-
-        # 启动新线程继续轮询
-        thread = threading.Thread(
-            target=self._run_resume_poll,
-            args=(key, conversation_id, extra_timeout_secs, dict(identity), mode, model, quota_reserved),
-            name=f"image-resume-{_clean(task_id)[:16]}",
-            daemon=True,
-        )
-        thread.start()
-        return _public_task(task)
-
-    def _run_resume_poll(
-        self,
-        key: str,
-        conversation_id: str,
-        extra_timeout_secs: float,
-        identity: dict[str, object],
-        mode: str,
-        model: str,
-        quota_reserved: bool = False,
-    ) -> None:
-        """后台线程：继续轮询已有 conversation_id 的图片结果。"""
-        started = time.time()
-        try:
-            from services.openai_backend_api import OpenAIBackendAPI
-            from services.protocol.conversation import format_image_result
-
-            backend = OpenAIBackendAPI(proxy_url=config.proxy_url or None)
-            file_ids, sediment_ids = backend._poll_image_results(
-                conversation_id,
-                extra_timeout_secs,
-            )
-            if not file_ids and not sediment_ids:
-                raise RuntimeError(
-                    f"继续等待 {extra_timeout_secs} 秒后仍未找到图片结果。"
-                )
-
-            image_urls = backend.resolve_conversation_image_urls(
-                conversation_id, file_ids, sediment_ids, poll=False,
-            )
-            if not image_urls:
-                raise RuntimeError("图片 URL 解析失败")
-
-            image_items = [
-                {"b64_json": __import__("base64").b64encode(image_data).decode("ascii")}
-                for image_data in backend.download_image_bytes(image_urls)
-            ]
-            # 获取 task 的原始 prompt（从 _public_task 的 mode 判断）
-            with self._lock:
-                task = self._tasks.get(key)
-                quality = _clean(task.get("quality"), "auto") if task else "auto"
-                size = _clean(task.get("size")) if task else None
-            data = format_image_result(
-                image_items,
-                "",  # prompt 已不重要，结果已经拿到了
-                "b64_json",
-                "",
-                int(time.time()),
-                owner_id=_owner_id(identity),
-            )["data"]
-            self._update_task(key, status=TASK_STATUS_SUCCESS, data=data, error="", duration_ms=int((time.time() - started) * 1000))
-            self._log_call(
-                identity,
-                mode,
-                model,
-                started,
-                "调用完成（续轮询）",
-                status="success",
-                urls=_collect_image_urls(data),
-            )
-        except Exception as exc:
-            if quota_reserved:
-                auth_service.refund_image_quota(identity, 1)
-            error_message = str(exc) or "resume poll failed"
-            duration_ms = int((time.time() - started) * 1000)
-            self._update_task(key, status=TASK_STATUS_ERROR, error=error_message, data=[], duration_ms=duration_ms)
-            self._log_call(
-                identity,
-                mode,
-                model,
-                started,
-                "调用失败（续轮询）",
-                status="failed",
-                error=error_message,
-            )
-
 
 image_task_service = ImageTaskService(DATA_DIR / "image_tasks.json")

@@ -92,8 +92,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Export the normalized official gallery as a static web asset package.")
     parser.add_argument(
         "--output",
-        default="../happyimage-web/public/seed-gallery",
-        help="Output directory, usually happyimage-web/public/seed-gallery",
+        default="../happytoken-web/public/seed-gallery",
+        help="Output directory, usually happytoken-web/public/seed-gallery",
     )
     parser.add_argument(
         "--copy-assets",

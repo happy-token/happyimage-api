@@ -1,6 +1,6 @@
 # Project Structure
 
-HappyImage API is organized around FastAPI routes, business services, protocol adapters, and storage backends. Keep new code close to the layer that owns the behavior.
+Happy Token API is organized around FastAPI routes, business services, protocol adapters, and storage backends. Keep new code close to the layer that owns the behavior.
 
 ## Top-level Layout
 
@@ -14,7 +14,7 @@ HappyImage API is organized around FastAPI routes, business services, protocol a
 | `scripts/` | Operational scripts, migrations, one-off maintenance tools |
 | `test/` | Pytest test suite |
 | `docs/` | Deployment, architecture, feature, and product notes |
-| `../happyimage-gallery-source/` | Large official gallery source data kept outside this git repository |
+| `../happytoken-gallery-source/` | Large official gallery source data kept outside this git repository |
 
 ## Layering Guidelines
 
@@ -51,7 +51,7 @@ Do not delete `.env`, `config.json`, or `data/*` during cleanup unless the opera
 |:--|:--|
 | `README.md` | Main setup, configuration, NewAPI overview, operations commands. |
 | `docs/architecture.md` | Mermaid architecture diagrams for deployment, route split, image data flow, auth, and storage. |
-| `docs/newapi-gateway.md` | Authoritative NewAPI integration and HappyImage Web model-gateway chain. |
+| `docs/newapi-gateway.md` | Authoritative NewAPI integration and Happy Token Web model-gateway chain. |
 | `docs/technical-log.md` | Bug history, root causes, fixes, and verification notes for future sessions. |
 | `docs/docker-deployment.md` | Docker deployment and server operations. |
 | `docs/feature-status.en.md` | Feature support matrix. |

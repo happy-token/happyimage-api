@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 import api.image_tasks as image_tasks_module
 
 
-AUTH_HEADERS = {"Authorization": "Bearer happyimage"}
+AUTH_HEADERS = {"Authorization": "Bearer happytoken"}
 PNG_BYTES = b"\x89PNG\r\n\x1a\n"
 DATA_IMAGE_URL = f"data:image/png;base64,{base64.b64encode(PNG_BYTES).decode('ascii')}"
 
@@ -108,13 +108,53 @@ class ImageTasksApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/image-tasks/generations",
             headers=AUTH_HEADERS,
-            json={"client_task_id": "task-1", "prompt": "cat", "model": "gpt-image-2"},
+            json={
+                "client_task_id": "task-1",
+                "prompt": "cat",
+                "model": "gpt-image-2",
+                "client_conversation_id": "conversation-1",
+                "client_turn_id": "turn-1",
+                "client_image_id": "image-1",
+            },
         )
 
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
         self.assertEqual(payload["id"], "task-1")
         self.assertEqual(payload["status"], "success")
+        self.assertEqual(len(self.fake_service.generation_calls), 1)
+        self.assertEqual(self.fake_service.generation_calls[0][1]["client_conversation_id"], "conversation-1")
+        self.assertEqual(self.fake_service.generation_calls[0][1]["client_turn_id"], "turn-1")
+        self.assertEqual(self.fake_service.generation_calls[0][1]["client_image_id"], "image-1")
+
+    def test_create_generation_task_rejects_reference_image_prompt(self):
+        response = self.client.post(
+            "/api/image-tasks/generations",
+            headers=AUTH_HEADERS,
+            json={
+                "client_task_id": "task-reference-missing",
+                "prompt": "Use the attached image for facial reference. Preserve the exact facial identity.",
+                "model": "gpt-image-2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        self.assertIn("请先上传参考图", response.json()["detail"]["error"])
+        self.assertEqual(len(self.fake_service.generation_calls), 0)
+
+    def test_create_generation_task_allows_plain_face_description(self):
+        response = self.client.post(
+            "/api/image-tasks/generations",
+            headers=AUTH_HEADERS,
+            json={
+                "client_task_id": "task-face-description",
+                "prompt": "生成一张电影感人像，保持自然脸部特征和真实身份感",
+                "model": "gpt-image-2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["id"], "task-face-description")
         self.assertEqual(len(self.fake_service.generation_calls), 1)
 
     def test_generation_duplicate_client_task_id_returns_existing_task(self):
@@ -152,7 +192,14 @@ class ImageTasksApiTests(unittest.TestCase):
         response = self.client.post(
             "/api/image-tasks/edits",
             headers=AUTH_HEADERS,
-            data={"client_task_id": "edit-1", "prompt": "edit", "model": "gpt-image-2"},
+            data={
+                "client_task_id": "edit-1",
+                "prompt": "edit",
+                "model": "gpt-image-2",
+                "client_conversation_id": "conversation-1",
+                "client_turn_id": "turn-1",
+                "client_image_id": "image-1",
+            },
             files=[
                 ("image", ("one.png", b"one", "image/png")),
                 ("image", ("two.png", b"two", "image/png")),
@@ -164,6 +211,9 @@ class ImageTasksApiTests(unittest.TestCase):
         self.assertEqual(len(self.fake_service.edit_calls), 1)
         images = self.fake_service.edit_calls[0][1]["images"]
         self.assertEqual(len(images), 2)
+        self.assertEqual(self.fake_service.edit_calls[0][1]["client_conversation_id"], "conversation-1")
+        self.assertEqual(self.fake_service.edit_calls[0][1]["client_turn_id"], "turn-1")
+        self.assertEqual(self.fake_service.edit_calls[0][1]["client_image_id"], "image-1")
 
     def test_create_edit_task_accepts_image_url(self):
         """测试图片编辑任务接口支持表单 image_url 引用。"""

@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import json
-import logging
 from typing import Any
-
-from services.protocol.conversation import ConversationRequest, collect_text, text_backend
-
-logger = logging.getLogger(__name__)
 
 MAX_TITLE_LENGTH = 200
 MAX_ORIGINAL_PROMPT_LENGTH = 8000
@@ -64,29 +59,23 @@ def _fallback(payload: dict[str, Any], default: str) -> str:
     return _clean(payload.get("original_prompt")) or default
 
 
-def _generate(payload: dict[str, Any], system_prompt: str, fallback: str) -> str:
-    request = ConversationRequest(
-        model="auto",
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": _metadata_text(payload)},
-        ],
-    )
-    try:
-        text = collect_text(text_backend(), request).strip()
-    except Exception as exc:
-        logger.warning(
-            "gallery prompt generation failed; using fallback (error_type=%s)",
-            type(exc).__name__,
-        )
-        return _fallback(payload, fallback)
-    return text or _fallback(payload, fallback)
+def _generate(payload: dict[str, Any], fallback: str) -> str:
+    metadata = _metadata(payload)
+    title = _clean(metadata.get("title"))
+    original_prompt = _clean(metadata.get("original_prompt"))
+    summary = _clean(metadata.get("conversation_summary"))
+    if summary:
+        return summary
+    if original_prompt:
+        return original_prompt
+    if title:
+        return title
+    return _fallback(payload, fallback)
 
 
 def generate_conversation_summary(payload: dict[str, Any]) -> str:
     return _generate(
         payload,
-        "你是图片图库助手。请根据用户的创作元数据，用简洁中文总结这张图的创作背景、画面重点和可分享亮点，控制在两三句话内。",
         "这张图片来自一次图库创作，可围绕画面主题提炼分享内容。",
     )
 
@@ -94,6 +83,5 @@ def generate_conversation_summary(payload: dict[str, Any]) -> str:
 def generate_share_prompt(payload: dict[str, Any]) -> str:
     return _generate(
         payload,
-        "你是图片分享文案助手。请基于元数据生成一段适合公开分享的中文提示词，保留关键视觉元素、风格、尺寸或质量要求，不要编造不存在的信息。",
         "请根据图片内容生成适合分享的中文文案。",
     )

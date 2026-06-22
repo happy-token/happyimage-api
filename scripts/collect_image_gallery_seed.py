@@ -70,7 +70,7 @@ class GalleryCase:
 
 
 def fetch_text(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": "HappyImageResearchBot/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Happy TokenResearchBot/0.1"})
     with urllib.request.urlopen(req, timeout=45) as resp:
         return resp.read().decode("utf-8")
 
@@ -157,7 +157,7 @@ def download_one(args: tuple[str, Path]) -> tuple[str, bool, str | None]:
     if dest.exists() and dest.stat().st_size > 0:
         return str(dest), True, None
     dest.parent.mkdir(parents=True, exist_ok=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "HappyImageResearchBot/0.1"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Happy TokenResearchBot/0.1"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             data = resp.read()
@@ -349,7 +349,7 @@ def csv_escape(value: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Collect CC0 image prompt gallery seed data.")
-    parser.add_argument("--output", default="../happyimage-gallery-source/image-gallery-seed", help="Output directory")
+    parser.add_argument("--output", default="../happytoken-gallery-source/image-gallery-seed", help="Output directory")
     parser.add_argument("--skip-download", action="store_true", help="Only create metadata")
     parser.add_argument("--workers", type=int, default=12, help="Concurrent image downloads")
     parser.add_argument(

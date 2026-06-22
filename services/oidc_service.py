@@ -1,8 +1,8 @@
-"""Generic OpenID Connect provider service for HappyImage user login.
+"""Generic OpenID Connect provider service for Happy Token user login.
 
 Handles OIDC discovery, PKCE authorize URL construction, token exchange,
 id_token claim validation, and userinfo retrieval. This service is for
-HappyImage web user login — it is separate from the OpenAI account OAuth
+Happy Token web user login — it is separate from the OpenAI account OAuth
 import flow.
 
 Note: Full JWT signature verification requires a crypto library (e.g.

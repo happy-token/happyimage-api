@@ -13,18 +13,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
 VERSION_FILE = BASE_DIR / "VERSION"
-BACKUP_STATE_FILE = DATA_DIR / "backup_state.json"
-
-DEFAULT_BACKUP_INCLUDE = {
-    "config": True,
-    "cpa": True,
-    "sub2api": True,
-    "logs": True,
-    "image_tasks": True,
-    "accounts_snapshot": True,
-    "auth_keys_snapshot": True,
-    "images": False,
-}
+DOTENV_FILE = BASE_DIR / ".env"
 
 DEFAULT_IMAGE_STORAGE = {
     "enabled": False,
@@ -32,29 +21,35 @@ DEFAULT_IMAGE_STORAGE = {
     "webdav_url": "",
     "webdav_username": "",
     "webdav_password": "",
-    "webdav_root_path": "happyimage/images",
+    "webdav_root_path": "happytoken/images",
     "public_base_url": "",
 }
 
-DEFAULT_CHAT_COMPLETION_CACHE = {
-    "enabled": True,
-    "ttl_seconds": 60,
-    "max_entries": 256,
-    "dedupe_inflight": True,
-    "stream_cache": True,
-    "normalize_messages": True,
-    "drop_adjacent_duplicates": True,
-    "drop_assistant_history": False,
-}
 
-DEFAULT_RECHARGE = {
-    "enabled": False,
-    "provider": "contact",
-    "newapi_base_url": "",
-    "newapi_console_topup_path": "/console/topup",
-    "webhook_secret": "",
-    "quota_per_unit": 1,
-}
+def _load_prefixed_dotenv() -> None:
+    if not DOTENV_FILE.exists() or not DOTENV_FILE.is_file():
+        return
+    try:
+        lines = DOTENV_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return
+    for line in lines:
+        raw = line.strip()
+        if not raw or raw.startswith("#") or "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key.startswith(("HAPPYTOKEN_", "HAPPYIMAGE_")):
+            continue
+        if key in os.environ:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        os.environ[key] = value
+
+
+_load_prefixed_dotenv()
 
 
 def _normalize_bool(value: object, default: bool = False) -> bool:
@@ -78,44 +73,11 @@ def _normalize_positive_int(value: object, default: int, minimum: int = 0) -> in
 
 
 def _getenv(name: str) -> str:
-    return str(os.getenv(name) or "").strip()
-
-
-def _normalize_backup_include(value: object) -> dict[str, bool]:
-    source = value if isinstance(value, dict) else {}
-    normalized = dict(DEFAULT_BACKUP_INCLUDE)
-    for key in normalized:
-        normalized[key] = _normalize_bool(source.get(key), normalized[key])
-    return normalized
-
-
-def _normalize_backup_settings(value: object) -> dict[str, object]:
-    source = value if isinstance(value, dict) else {}
-    return {
-        "enabled": _normalize_bool(source.get("enabled"), False),
-        "provider": "cloudflare_r2",
-        "account_id": str(source.get("account_id") or "").strip(),
-        "access_key_id": str(source.get("access_key_id") or "").strip(),
-        "secret_access_key": str(source.get("secret_access_key") or "").strip(),
-        "bucket": str(source.get("bucket") or "").strip(),
-        "prefix": str(source.get("prefix") or "backups").strip().strip("/") or "backups",
-        "interval_minutes": _normalize_positive_int(source.get("interval_minutes"), 360, 1),
-        "rotation_keep": _normalize_positive_int(source.get("rotation_keep"), 10, 0),
-        "encrypt": _normalize_bool(source.get("encrypt"), False),
-        "passphrase": str(source.get("passphrase") or "").strip(),
-        "include": _normalize_backup_include(source.get("include")),
-    }
-
-
-def _normalize_backup_state(value: object) -> dict[str, object]:
-    source = value if isinstance(value, dict) else {}
-    return {
-        "last_started_at": str(source.get("last_started_at") or "").strip() or None,
-        "last_finished_at": str(source.get("last_finished_at") or "").strip() or None,
-        "last_status": str(source.get("last_status") or "idle").strip() or "idle",
-        "last_error": str(source.get("last_error") or "").strip() or None,
-        "last_object_key": str(source.get("last_object_key") or "").strip() or None,
-    }
+    value = str(os.getenv(name) or "").strip()
+    if value or not name.startswith("HAPPYTOKEN_"):
+        return value
+    legacy_name = "HAPPYIMAGE_" + name.removeprefix("HAPPYTOKEN_")
+    return str(os.getenv(legacy_name) or "").strip()
 
 
 def _normalize_image_storage_settings(value: object) -> dict[str, object]:
@@ -142,31 +104,25 @@ def _normalize_oidc_settings(value: object) -> dict[str, object]:
     source = value if isinstance(value, dict) else {}
     return {
         "enabled": _normalize_bool(
-            _getenv("HAPPYIMAGE_OIDC_ENABLED") or source.get("enabled"), False
+            _getenv("HAPPYTOKEN_OIDC_ENABLED") or source.get("enabled"), False
         ),
         "issuer": str(
-            _getenv("HAPPYIMAGE_OIDC_ISSUER") or source.get("issuer") or ""
+            _getenv("HAPPYTOKEN_OIDC_ISSUER") or source.get("issuer") or ""
         ).strip().rstrip("/"),
         "client_id": str(
-            _getenv("HAPPYIMAGE_OIDC_CLIENT_ID") or source.get("client_id") or ""
+            _getenv("HAPPYTOKEN_OIDC_CLIENT_ID") or source.get("client_id") or ""
         ).strip(),
         "client_secret": str(
-            _getenv("HAPPYIMAGE_OIDC_CLIENT_SECRET") or source.get("client_secret") or ""
+            _getenv("HAPPYTOKEN_OIDC_CLIENT_SECRET") or source.get("client_secret") or ""
         ).strip(),
         "scopes": str(
-            _getenv("HAPPYIMAGE_OIDC_SCOPES") or source.get("scopes") or "openid profile email"
+            _getenv("HAPPYTOKEN_OIDC_SCOPES") or source.get("scopes") or "openid profile email"
         ).strip(),
         "allowed_email_domains": str(
-            _getenv("HAPPYIMAGE_OIDC_ALLOWED_EMAIL_DOMAINS")
+            _getenv("HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS")
             or source.get("allowed_email_domains")
             or ""
         ).strip(),
-        "default_image_quota": _normalize_positive_int(
-            _getenv("HAPPYIMAGE_OIDC_DEFAULT_IMAGE_QUOTA")
-            if _getenv("HAPPYIMAGE_OIDC_DEFAULT_IMAGE_QUOTA")
-            else source.get("default_image_quota", 0),
-            0,
-        ),
     }
 
 
@@ -177,93 +133,6 @@ def _redact_oidc_secret(oidc: dict[str, object]) -> dict[str, object]:
     else:
         redacted["client_secret_configured"] = False
     redacted.pop("client_secret", None)
-    return redacted
-
-
-def _normalize_chat_completion_cache_settings(value: object) -> dict[str, object]:
-    source = value if isinstance(value, dict) else {}
-    return {
-        "enabled": _normalize_bool(source.get("enabled"), DEFAULT_CHAT_COMPLETION_CACHE["enabled"]),
-        "ttl_seconds": _normalize_positive_int(
-            source.get("ttl_seconds"),
-            int(DEFAULT_CHAT_COMPLETION_CACHE["ttl_seconds"]),
-            0,
-        ),
-        "max_entries": _normalize_positive_int(
-            source.get("max_entries"),
-            int(DEFAULT_CHAT_COMPLETION_CACHE["max_entries"]),
-            1,
-        ),
-        "dedupe_inflight": _normalize_bool(
-            source.get("dedupe_inflight"),
-            bool(DEFAULT_CHAT_COMPLETION_CACHE["dedupe_inflight"]),
-        ),
-        "stream_cache": _normalize_bool(
-            source.get("stream_cache"),
-            bool(DEFAULT_CHAT_COMPLETION_CACHE["stream_cache"]),
-        ),
-        "normalize_messages": _normalize_bool(
-            source.get("normalize_messages"),
-            bool(DEFAULT_CHAT_COMPLETION_CACHE["normalize_messages"]),
-        ),
-        "drop_adjacent_duplicates": _normalize_bool(
-            source.get("drop_adjacent_duplicates"),
-            bool(DEFAULT_CHAT_COMPLETION_CACHE["drop_adjacent_duplicates"]),
-        ),
-        "drop_assistant_history": _normalize_bool(
-            source.get("drop_assistant_history"),
-            bool(DEFAULT_CHAT_COMPLETION_CACHE["drop_assistant_history"]),
-        ),
-    }
-
-
-def _normalize_recharge_settings(value: object) -> dict[str, object]:
-    source = value if isinstance(value, dict) else {}
-    provider = str(
-        _getenv("HAPPYIMAGE_RECHARGE_PROVIDER")
-        or source.get("provider")
-        or DEFAULT_RECHARGE["provider"]
-    ).strip().lower()
-    if provider not in {"contact", "newapi"}:
-        provider = "contact"
-    console_path = str(
-        _getenv("HAPPYIMAGE_NEWAPI_CONSOLE_TOPUP_PATH")
-        or source.get("newapi_console_topup_path")
-        or DEFAULT_RECHARGE["newapi_console_topup_path"]
-    ).strip()
-    if not console_path.startswith("/"):
-        console_path = f"/{console_path}"
-    return {
-        "enabled": _normalize_bool(
-            _getenv("HAPPYIMAGE_RECHARGE_ENABLED") or source.get("enabled"),
-            bool(DEFAULT_RECHARGE["enabled"]),
-        ),
-        "provider": provider,
-        "newapi_base_url": str(
-            _getenv("HAPPYIMAGE_NEWAPI_BASE_URL")
-            or source.get("newapi_base_url")
-            or ""
-        ).strip().rstrip("/"),
-        "newapi_console_topup_path": console_path,
-        "webhook_secret": str(
-            _getenv("HAPPYIMAGE_RECHARGE_WEBHOOK_SECRET")
-            or source.get("webhook_secret")
-            or ""
-        ).strip(),
-        "quota_per_unit": _normalize_positive_int(
-            _getenv("HAPPYIMAGE_RECHARGE_QUOTA_PER_UNIT")
-            if _getenv("HAPPYIMAGE_RECHARGE_QUOTA_PER_UNIT")
-            else source.get("quota_per_unit"),
-            int(DEFAULT_RECHARGE["quota_per_unit"]),
-            1,
-        ),
-    }
-
-
-def _redact_recharge_secret(settings: dict[str, object]) -> dict[str, object]:
-    redacted = dict(settings)
-    redacted["webhook_secret_configured"] = bool(str(redacted.get("webhook_secret") or "").strip())
-    redacted.pop("webhook_secret", None)
     return redacted
 
 
@@ -278,16 +147,7 @@ def _validate_image_storage_settings(settings: dict[str, object]) -> None:
 
 @dataclass(frozen=True)
 class LoadedSettings:
-    auth_key: str
     refresh_account_interval_minute: int
-
-
-def _normalize_auth_key(value: object) -> str:
-    return str(value or "").strip()
-
-
-def _is_invalid_auth_key(value: object) -> bool:
-    return _normalize_auth_key(value) == ""
 
 
 def _read_json_object(path: Path, *, name: str) -> dict[str, object]:
@@ -309,22 +169,13 @@ def _read_json_object(path: Path, *, name: str) -> dict[str, object]:
 def _load_settings() -> LoadedSettings:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     raw_config = _read_json_object(CONFIG_FILE, name="config.json")
-    auth_key = _normalize_auth_key(_getenv("HAPPYIMAGE_AUTH_KEY") or raw_config.get("auth-key"))
-    if _is_invalid_auth_key(auth_key):
-        raise ValueError(
-            "❌ auth-key 未设置！\n"
-            "请在环境变量 HAPPYIMAGE_AUTH_KEY 中设置，或者在 config.json 中填写 auth-key。"
-        )
 
     try:
         refresh_interval = int(raw_config.get("refresh_account_interval_minute", 5))
     except (TypeError, ValueError):
         refresh_interval = 5
 
-    return LoadedSettings(
-        auth_key=auth_key,
-        refresh_account_interval_minute=refresh_interval,
-    )
+    return LoadedSettings(refresh_account_interval_minute=refresh_interval)
 
 
 class ConfigStore:
@@ -333,25 +184,12 @@ class ConfigStore:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.data = self._load()
         self._storage_backend: StorageBackend | None = None
-        if _is_invalid_auth_key(self.auth_key):
-            raise ValueError(
-                "❌ auth-key 未设置！\n"
-                "请按以下任意一种方式解决：\n"
-                "1. 在 Render 的 Environment 变量中添加：\n"
-                "   HAPPYIMAGE_AUTH_KEY = your_real_auth_key\n"
-                "2. 或者在 config.json 中填写：\n"
-                '   "auth-key": "your_real_auth_key"'
-            )
 
     def _load(self) -> dict[str, object]:
         return _read_json_object(self.path, name="config.json")
 
     def _save(self) -> None:
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-    @property
-    def auth_key(self) -> str:
-        return _normalize_auth_key(_getenv("HAPPYIMAGE_AUTH_KEY") or self.data.get("auth-key"))
 
     @property
     def accounts_file(self) -> Path:
@@ -434,20 +272,6 @@ class ConfigStore:
             return 2.0
 
     @property
-    def auto_remove_invalid_accounts(self) -> bool:
-        value = self.data.get("auto_remove_invalid_accounts", False)
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
-
-    @property
-    def auto_remove_rate_limited_accounts(self) -> bool:
-        value = self.data.get("auto_remove_rate_limited_accounts", False)
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
-
-    @property
     def auto_relogin_after_refresh(self) -> bool:
         value = self.data.get("auto_relogin_after_refresh", False)
         if isinstance(value, str):
@@ -505,7 +329,7 @@ class ConfigStore:
     @property
     def base_url(self) -> str:
         return str(
-            _getenv("HAPPYIMAGE_BASE_URL")
+            _getenv("HAPPYTOKEN_BASE_URL")
             or self.data.get("base_url")
             or ""
         ).strip().rstrip("/")
@@ -513,7 +337,7 @@ class ConfigStore:
     @property
     def frontend_base_url(self) -> str:
         return str(
-            _getenv("HAPPYIMAGE_FRONTEND_BASE_URL")
+            _getenv("HAPPYTOKEN_FRONTEND_BASE_URL")
             or self.data.get("frontend_base_url")
             or ""
         ).strip().rstrip("/")
@@ -521,7 +345,7 @@ class ConfigStore:
     @property
     def api_base_url(self) -> str:
         return str(
-            _getenv("HAPPYIMAGE_API_BASE_URL")
+            _getenv("HAPPYTOKEN_API_BASE_URL")
             or self.data.get("api_base_url")
             or self.base_url
             or ""
@@ -529,7 +353,7 @@ class ConfigStore:
 
     @property
     def cors_origins(self) -> list[str]:
-        env_value = _getenv("HAPPYIMAGE_CORS_ORIGINS")
+        env_value = _getenv("HAPPYTOKEN_CORS_ORIGINS")
         if env_value:
             return [origin.strip() for origin in env_value.split(",") if origin.strip()]
         frontend = self.frontend_base_url
@@ -543,62 +367,29 @@ class ConfigStore:
     @property
     def session_secret(self) -> str:
         return str(
-            _getenv("HAPPYIMAGE_SESSION_SECRET")
+            _getenv("HAPPYTOKEN_SESSION_SECRET")
             or self.data.get("session_secret")
             or ""
         ).strip()
 
     @property
     def session_cookie_name(self) -> str:
-        return str(
-            _getenv("HAPPYIMAGE_SESSION_COOKIE_NAME")
+        value = str(
+            _getenv("HAPPYTOKEN_SESSION_COOKIE_NAME")
             or self.data.get("session_cookie_name")
-            or "happyimage_session"
+            or "happytoken_session"
         ).strip()
+        return "happytoken_session" if value == "happyimage_session" else value
 
     @property
     def session_max_age_seconds(self) -> int:
         try:
             return max(60, int(
-                _getenv("HAPPYIMAGE_SESSION_MAX_AGE_SECONDS")
+                _getenv("HAPPYTOKEN_SESSION_MAX_AGE_SECONDS")
                 or self.data.get("session_max_age_seconds", 86400)
             ))
         except (TypeError, ValueError):
             return 86400
-
-    @property
-    def default_user_image_quota(self) -> int:
-        return _normalize_positive_int(
-            _getenv("HAPPYIMAGE_DEFAULT_USER_IMAGE_QUOTA")
-            if _getenv("HAPPYIMAGE_DEFAULT_USER_IMAGE_QUOTA")
-            else self.data.get("default_user_image_quota", 20),
-            20,
-        )
-
-    @property
-    def model_gateway_base_url(self) -> str:
-        return str(
-            _getenv("HAPPYIMAGE_MODEL_GATEWAY_BASE_URL")
-            or self.data.get("model_gateway_base_url")
-            or ""
-        ).strip().rstrip("/")
-
-    @property
-    def model_gateway_api_key(self) -> str:
-        return str(
-            _getenv("HAPPYIMAGE_MODEL_GATEWAY_API_KEY")
-            or self.data.get("model_gateway_api_key")
-            or ""
-        ).strip()
-
-    @property
-    def require_model_gateway(self) -> bool:
-        value = (
-            _getenv("HAPPYIMAGE_REQUIRE_MODEL_GATEWAY")
-            or self.data.get("require_model_gateway")
-            or False
-        )
-        return _normalize_bool(value, False)
 
     @property
     def app_version(self) -> str:
@@ -611,16 +402,11 @@ class ConfigStore:
     def get(self) -> dict[str, object]:
         data = dict(self.data)
         data["proxy"] = self.get_proxy_settings()
-        data["refresh_account_interval_minute"] = self.refresh_account_interval_minute
         data["image_retention_days"] = self.image_retention_days
         data["image_poll_timeout_secs"] = self.image_poll_timeout_secs
         data["image_poll_interval_secs"] = self.image_poll_interval_secs
         data["image_poll_initial_wait_secs"] = self.image_poll_initial_wait_secs
-        data["image_account_concurrency"] = self.image_account_concurrency
         data["image_parallel_generation"] = self.image_parallel_generation
-        data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
-        data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
-        data["auto_relogin_after_refresh"] = self.auto_relogin_after_refresh
         data["log_levels"] = self.log_levels
         data["sensitive_words"] = self.sensitive_words
         data["ai_review"] = self.ai_review
@@ -630,48 +416,34 @@ class ConfigStore:
         data["cors_origins"] = self.cors_origins
         data["session_cookie_name"] = self.session_cookie_name
         data["session_max_age_seconds"] = self.session_max_age_seconds
-        data["default_user_image_quota"] = self.default_user_image_quota
-        data["model_gateway_base_url"] = self.model_gateway_base_url
-        data["model_gateway_api_key_configured"] = bool(self.model_gateway_api_key)
-        data["require_model_gateway"] = self.require_model_gateway
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
-        data["backup"] = self.get_backup_settings()
         data["image_storage"] = self.get_image_storage_settings()
-        data["chat_completion_cache"] = self.get_chat_completion_cache_settings()
-        data["recharge"] = _redact_recharge_secret(self.get_recharge_settings())
         data.pop("auth-key", None)
         data.pop("session_secret", None)
         data.pop("model_gateway_api_key", None)
+        data.pop("model_gateway_provider", None)
+        data.pop("model_gateway_base_url", None)
+        data.pop("model_gateway_api_key_configured", None)
+        data.pop("refresh_account_interval_minute", None)
+        data.pop("image_account_concurrency", None)
+        data.pop("auto_remove_invalid_accounts", None)
+        data.pop("auto_remove_rate_limited_accounts", None)
+        data.pop("auto_relogin_after_refresh", None)
+        data.pop("backup", None)
+        data.pop("backup_state", None)
+        data.pop("chat_completion_cache", None)
         return data
 
     def get_proxy_settings(self) -> str:
-        return str(_getenv("HAPPYIMAGE_PROXY") or self.data.get("proxy") or "").strip()
+        return str(_getenv("HAPPYTOKEN_PROXY") or self.data.get("proxy") or "").strip()
 
     def update(self, data: dict[str, object]) -> dict[str, object]:
         next_data = dict(self.data)
         next_data.update(dict(data or {}))
-        if "model_gateway_base_url" in next_data:
-            next_data["model_gateway_base_url"] = str(next_data.get("model_gateway_base_url") or "").strip().rstrip("/")
-        if "model_gateway_api_key" in next_data:
-            next_gateway_key = str(next_data.get("model_gateway_api_key") or "").strip()
-            next_data["model_gateway_api_key"] = next_gateway_key or str(self.data.get("model_gateway_api_key") or "").strip()
-        if "backup" in next_data:
-            next_data["backup"] = _normalize_backup_settings(next_data.get("backup"))
         if "image_storage" in next_data:
             next_data["image_storage"] = _normalize_image_storage_settings(next_data.get("image_storage"))
             _validate_image_storage_settings(next_data["image_storage"])
-        if "chat_completion_cache" in next_data:
-            next_data["chat_completion_cache"] = _normalize_chat_completion_cache_settings(
-                next_data.get("chat_completion_cache")
-            )
-        if "recharge" in next_data:
-            incoming_recharge = next_data.get("recharge")
-            if isinstance(incoming_recharge, dict):
-                normalized = _normalize_recharge_settings(incoming_recharge)
-                if not str(normalized.get("webhook_secret") or "").strip():
-                    normalized["webhook_secret"] = self.get_recharge_settings().get("webhook_secret", "")
-                next_data["recharge"] = normalized
         if "oidc" in next_data:
             incoming_oidc = next_data.get("oidc")
             if isinstance(incoming_oidc, dict):
@@ -682,24 +454,25 @@ class ConfigStore:
         next_data.pop("backup_state", None)
         next_data.pop("session_secret_configured", None)
         next_data.pop("model_gateway_api_key_configured", None)
+        next_data.pop("model_gateway_api_key", None)
+        next_data.pop("model_gateway_provider", None)
+        next_data.pop("model_gateway_base_url", None)
+        next_data.pop("refresh_account_interval_minute", None)
+        next_data.pop("image_account_concurrency", None)
+        next_data.pop("auto_remove_invalid_accounts", None)
+        next_data.pop("auto_remove_rate_limited_accounts", None)
+        next_data.pop("auto_relogin_after_refresh", None)
+        next_data.pop("backup", None)
+        next_data.pop("chat_completion_cache", None)
         self.data = next_data
         self._save()
         return self.get()
 
-    def get_backup_settings(self) -> dict[str, object]:
-        return _normalize_backup_settings(self.data.get("backup"))
-
     def get_image_storage_settings(self) -> dict[str, object]:
         return _normalize_image_storage_settings(self.data.get("image_storage"))
 
-    def get_chat_completion_cache_settings(self) -> dict[str, object]:
-        return _normalize_chat_completion_cache_settings(self.data.get("chat_completion_cache"))
-
     def get_oidc_settings(self) -> dict[str, object]:
         return _normalize_oidc_settings(self.data.get("oidc"))
-
-    def get_recharge_settings(self) -> dict[str, object]:
-        return _normalize_recharge_settings(self.data.get("recharge"))
 
     def get_storage_backend(self) -> StorageBackend:
         """获取存储后端实例（单例）"""
@@ -707,16 +480,5 @@ class ConfigStore:
             from services.storage.factory import create_storage_backend
             self._storage_backend = create_storage_backend(DATA_DIR)
         return self._storage_backend
-
-
-def load_backup_state() -> dict[str, object]:
-    return _normalize_backup_state(_read_json_object(BACKUP_STATE_FILE, name="backup_state.json"))
-
-
-def save_backup_state(state: dict[str, object]) -> dict[str, object]:
-    normalized = _normalize_backup_state(state)
-    BACKUP_STATE_FILE.write_text(json.dumps(normalized, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return normalized
-
 
 config = ConfigStore(CONFIG_FILE)

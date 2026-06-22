@@ -13,7 +13,6 @@ class ImageAccessServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         fake_config = SimpleNamespace(
             session_secret="session-secret",
-            auth_key="auth-key",
             data={"image_access_token_ttl_seconds": 60},
         )
         patcher = mock.patch.object(image_access_service, "config", fake_config)

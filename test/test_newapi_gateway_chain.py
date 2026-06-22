@@ -12,9 +12,17 @@ import api.ai as ai_api
 from api.app import create_app
 
 
-HAPPYIMAGE_KEY = "happyimage-upstream-key"
+HAPPYTOKEN_KEY = "happytoken-upstream-key"
 NEWAPI_KEY = "newapi-user-key"
 PNG_DATA_URL = "data:image/png;base64," + base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+GATEWAY_IDENTITY = {
+    "id": "user-1",
+    "name": "User",
+    "role": "user",
+    "model_provider": "newapi",
+    "model_base_url": "https://gateway.example.test/v1",
+    "model_api_key": "sk-user-provider",
+}
 
 
 def _make_newapi_gateway(upstream: TestClient) -> TestClient:
@@ -26,7 +34,7 @@ def _make_newapi_gateway(upstream: TestClient) -> TestClient:
         if authorization != f"Bearer {NEWAPI_KEY}":
             return Response(status_code=401, content=b'{"error":"invalid newapi token"}', media_type="application/json")
         body = await request.body()
-        headers = {"Authorization": f"Bearer {HAPPYIMAGE_KEY}"}
+        headers = {"Authorization": f"Bearer {HAPPYTOKEN_KEY}"}
         content_type = request.headers.get("content-type")
         if content_type:
             headers["Content-Type"] = content_type
@@ -46,13 +54,12 @@ def _make_newapi_gateway(upstream: TestClient) -> TestClient:
     return TestClient(app)
 
 
-def test_newapi_gateway_chain_for_openai_compatible_routes():
+def test_newapi_gateway_chain_for_image_compatible_routes():
     with mock.patch.dict(
         os.environ,
         {
-            "HAPPYIMAGE_AUTH_KEY": HAPPYIMAGE_KEY,
-            "HAPPYIMAGE_SESSION_SECRET": "newapi-chain-session-secret",
-            "HAPPYIMAGE_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_SESSION_SECRET": "newapi-chain-session-secret",
+            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
         },
         clear=False,
     ), mock.patch.object(
@@ -61,40 +68,23 @@ def test_newapi_gateway_chain_for_openai_compatible_routes():
         return_value={
             "object": "list",
             "data": [
-                {"id": "gpt-image-2", "object": "model", "created": 0, "owned_by": "happyimage"},
-                {"id": "auto", "object": "model", "created": 0, "owned_by": "happyimage"},
+                {"id": "gpt-image-2", "object": "model", "created": 0, "owned_by": "happytoken"},
+                {"id": "auto", "object": "model", "created": 0, "owned_by": "happytoken"},
             ],
         },
     ), mock.patch.object(
-        ai_api.openai_v1_image_generations,
-        "handle",
+        ai_api.model_gateway_service,
+        "generate_image",
         return_value={"created": 1, "data": [{"b64_json": "ZmFrZS1pbWFnZQ=="}]},
     ), mock.patch.object(
-        ai_api.openai_v1_image_edit,
-        "handle",
+        ai_api.model_gateway_service,
+        "edit_image",
         return_value={"created": 1, "data": [{"b64_json": "ZmFrZS1lZGl0"}]},
-    ), mock.patch.object(
-        ai_api.openai_v1_chat_complete,
-        "handle",
-        return_value={
-            "id": "chatcmpl-test",
-            "object": "chat.completion",
-            "created": 1,
-            "model": "auto",
-            "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
-        },
-    ), mock.patch.object(
-        ai_api.openai_v1_response,
-        "handle",
-        return_value={
-            "id": "resp-test",
-            "object": "response",
-            "created_at": 1,
-            "status": "completed",
-            "model": "auto",
-            "output": [{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "ok"}]}],
-        },
-    ), mock.patch.object(ai_api, "check_request", return_value=None):
+    ), mock.patch.object(ai_api, "check_request", return_value=None), mock.patch.object(
+        ai_api,
+        "require_identity",
+        return_value=GATEWAY_IDENTITY,
+    ):
         upstream = TestClient(create_app())
         newapi = _make_newapi_gateway(upstream)
 
@@ -119,24 +109,8 @@ def test_newapi_gateway_chain_for_openai_compatible_routes():
         assert edit.status_code == 200, edit.text
         assert edit.json()["data"][0]["b64_json"] == "ZmFrZS1lZGl0"
 
-        chat = newapi.post(
-            "/v1/chat/completions",
-            headers=headers,
-            json={"model": "auto", "messages": [{"role": "user", "content": "hello"}]},
-        )
-        assert chat.status_code == 200, chat.text
-        assert chat.json()["choices"][0]["message"]["content"] == "ok"
 
-        response = newapi.post(
-            "/v1/responses",
-            headers=headers,
-            json={"model": "auto", "input": "hello"},
-        )
-        assert response.status_code == 200, response.text
-        assert response.json()["status"] == "completed"
-
-
-def test_newapi_gateway_does_not_cover_happyimage_web_api_routes():
+def test_newapi_gateway_does_not_cover_happytoken_web_api_routes():
     upstream = TestClient(create_app())
     newapi = _make_newapi_gateway(upstream)
 
