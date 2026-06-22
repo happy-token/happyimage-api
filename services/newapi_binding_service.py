@@ -30,13 +30,15 @@ class NewAPIBindingService:
         settings = self._settings or self._load_settings()
         provision_url = _clean(settings.get("provision_url"))
         provision_secret = _clean(settings.get("provision_secret"))
+        base_url = self._normalize_url(settings.get("base_url"), default=DEFAULT_NEWAPI_URL)
+        management_url = self._normalize_url(settings.get("management_url"), default=base_url)
         if not bool(settings.get("enabled")) or not provision_url or not provision_secret:
             return {
                 "ok": False,
                 "status": "pending",
                 "message": "NewAPI provisioning endpoint is not configured",
-                "base_url": self._normalize_url(settings.get("base_url"), default=DEFAULT_NEWAPI_URL),
-                "management_url": self._normalize_url(settings.get("management_url"), default=DEFAULT_NEWAPI_URL),
+                "base_url": base_url,
+                "management_url": management_url,
             }
 
         session = self._make_session()
@@ -69,12 +71,12 @@ class NewAPIBindingService:
                 "user_id": _clean(data.get("user_id")),
                 "token_id": _clean(data.get("token_id")),
                 "token": _clean(data.get("token")),
-                "base_url": self._normalize_url(data.get("base_url") or settings.get("base_url"), default=DEFAULT_NEWAPI_URL),
+                "base_url": self._normalize_url(data.get("base_url") or base_url, default=DEFAULT_NEWAPI_URL),
                 "management_url": self._normalize_url(
                     data.get("management_url")
-                    or settings.get("management_url")
+                    or management_url
                     or data.get("base_url")
-                    or settings.get("base_url"),
+                    or base_url,
                     default=DEFAULT_NEWAPI_URL,
                 ),
             }

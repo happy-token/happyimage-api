@@ -211,6 +211,29 @@ def test_newapi_binding_pending_response_defaults_missing_urls():
     }
 
 
+def test_newapi_binding_pending_management_url_falls_back_to_base_url():
+    service = NewAPIBindingService(
+        settings={
+            "enabled": False,
+            "base_url": "https://custom.example/v1/",
+            "management_url": "",
+            "provision_url": "",
+            "provision_secret": "",
+        },
+        session_factory=lambda: FakeSession(),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result["base_url"] == "https://custom.example/v1"
+    assert result["management_url"] == "https://custom.example/v1"
+
+
 def test_newapi_binding_calls_configured_provisioning_endpoint_with_auth_and_payload():
     session = FakeSession(
         FakeResponse(
