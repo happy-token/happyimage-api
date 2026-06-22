@@ -41,8 +41,9 @@ class NewAPIBindingService:
                 "management_url": management_url,
             }
 
-        session = self._make_session()
+        session = None
         try:
+            session = self._make_session()
             response = session.post(
                 provision_url,
                 headers={
@@ -83,10 +84,11 @@ class NewAPIBindingService:
         except Exception:
             return self._failed(message="NewAPI provisioning request failed")
         finally:
-            try:
-                session.close()
-            except Exception:
-                pass
+            if session is not None:
+                try:
+                    session.close()
+                except Exception:
+                    pass
 
     def _make_session(self) -> Any:
         if self._session_factory is not None:

@@ -376,6 +376,29 @@ def test_newapi_binding_exception_failure_is_redacted_and_closes_session():
     assert "sk-exception-token" not in result_text
 
 
+def test_newapi_binding_session_factory_failure_is_redacted():
+    def raise_session_error():
+        raise RuntimeError("secret=provision-secret token=sk-session-token")
+
+    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=raise_session_error)
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "failed",
+        "message": "NewAPI provisioning request failed",
+    }
+    result_text = str(result)
+    assert "provision-secret" not in result_text
+    assert "sk-session-token" not in result_text
+
+
 def test_newapi_binding_missing_token_failure_is_redacted():
     session = FakeSession(
         FakeResponse(
