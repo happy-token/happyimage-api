@@ -255,6 +255,14 @@ def _registration_enabled() -> bool:
     return enabled not in {"0", "false", "no", "off"}
 
 
+def _local_password_login_enabled() -> bool:
+    enabled = str(
+        os.getenv("HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED")
+        or config.data.get("local_password_login_enabled", "false")
+    ).strip().lower()
+    return enabled in {"1", "true", "yes", "on"}
+
+
 def _normalize_register_name(body: RegisterRequest) -> str:
     name = (body.name or body.email or "").strip()
     if len(name) < 2:
@@ -323,6 +331,9 @@ def create_router(app_version: str) -> APIRouter:
 
     @router.post("/api/auth/login")
     async def password_login(request: Request, body: PasswordLoginRequest):
+        if not _local_password_login_enabled():
+            raise HTTPException(status_code=403, detail={"error": "请使用统一登录入口"})
+
         email = body.email.strip()
         password = body.password.strip()
         _check_auth_rate_limit(request, "password_login", email)
@@ -344,6 +355,8 @@ def create_router(app_version: str) -> APIRouter:
 
     @router.post("/api/auth/register")
     async def register_user(request: Request, body: RegisterRequest):
+        raise HTTPException(status_code=403, detail={"error": "注册请使用统一登录入口"})
+
         _check_auth_rate_limit(request, "register", body.name)
         if not _registration_enabled():
             raise HTTPException(status_code=403, detail={"error": "注册功能暂未开放"})

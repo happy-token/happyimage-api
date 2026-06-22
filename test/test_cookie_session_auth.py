@@ -25,12 +25,65 @@ def _login_password(client: TestClient, role: str = "admin", prefix: str = "acco
     return name, password, response
 
 
+def test_password_login_disabled_by_default_returns_unified_login_error():
+    name, password = _create_password_account(role="admin", prefix="disabled-login")
+    with mock.patch.dict(
+        os.environ,
+        {"HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "false"},
+        clear=False,
+    ):
+        with TestClient(create_app()) as client:
+            response = client.post("/api/auth/login", json={"email": name, "password": password})
+
+            assert response.status_code == 403, response.text
+            assert response.json()["detail"]["error"] == "请使用统一登录入口"
+
+
+def test_password_login_can_be_enabled_for_emergency_ops():
+    with mock.patch.dict(
+        os.environ,
+        {
+            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
+            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
+        },
+        clear=False,
+    ):
+        with TestClient(create_app()) as client:
+            response = _login_password(client, prefix="emergency-admin")[2]
+
+            assert response.status_code == 200, response.text
+            assert response.json()["role"] == "admin"
+
+
+def test_register_disabled_even_when_registration_enabled():
+    with mock.patch.dict(
+        os.environ,
+        {"HAPPYTOKEN_REGISTRATION_ENABLED": "true"},
+        clear=False,
+    ):
+        with TestClient(create_app()) as client:
+            response = client.post(
+                "/api/auth/register",
+                json={
+                    "name": f"register-{uuid.uuid4().hex[:8]}",
+                    "email": "creator@example.com",
+                    "password": "register-password",
+                    "confirm_password": "register-password",
+                },
+            )
+
+            assert response.status_code == 403, response.text
+            assert response.json()["detail"]["error"] == "注册请使用统一登录入口"
+
+
 def test_password_login_sets_cookie_and_cookie_authenticates_admin_api():
     with mock.patch.dict(
         os.environ,
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -54,6 +107,7 @@ def test_session_accepts_bearer_token_when_cookie_is_missing():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -74,6 +128,7 @@ def test_admin_created_user_does_not_include_image_quota():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -101,6 +156,7 @@ def test_user_profile_can_update_watermark_label():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -128,6 +184,7 @@ def test_user_profile_model_providers_can_be_selected_and_preserve_keys():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -200,6 +257,7 @@ def test_user_profile_preferences_sync_to_account():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -248,6 +306,7 @@ def test_admin_profile_can_sync_preferences_without_provider_fields():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -274,6 +333,7 @@ def test_test_user_password_login_is_case_insensitive():
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
             "HAPPYTOKEN_TEST_ACCOUNTS_ENABLED": "true",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
@@ -323,6 +383,7 @@ def test_cookie_auth_rejects_untrusted_write_origin():
         {
             "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
             "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
+            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
         },
         clear=False,
     ):
