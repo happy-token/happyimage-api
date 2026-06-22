@@ -522,3 +522,19 @@ Dockerfile 使用 China-friendly mirrors：
 ```bash
 HAPPYTOKEN_PYTHON_IMAGE=python:3.13-slim
 ```
+
+## Unified Login / NewAPI Binding
+
+Normal users should authenticate through Casdoor OIDC. Public password login is disabled unless `HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED=true` is set for emergency operations.
+
+NewAPI binding environment:
+
+```bash
+HAPPYTOKEN_NEWAPI_BASE_URL=https://gateway.happy-token.cn
+HAPPYTOKEN_NEWAPI_MANAGEMENT_URL=https://gateway.happy-token.cn
+HAPPYTOKEN_NEWAPI_PROVISION_URL=http://newapi:3000/api/internal/happyimage/bind-token
+HAPPYTOKEN_NEWAPI_PROVISION_SECRET=replace-with-internal-secret
+HAPPYTOKEN_NEWAPI_TOKEN_NAME="HappyImage Default"
+```
+
+If `HAPPYTOKEN_NEWAPI_PROVISION_URL` or `HAPPYTOKEN_NEWAPI_PROVISION_SECRET` is missing, OIDC login still succeeds and the user session reports `newapi_binding_status=pending`.
