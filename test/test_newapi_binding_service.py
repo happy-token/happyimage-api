@@ -297,7 +297,7 @@ def test_newapi_binding_successful_response_exposes_token_and_base_url():
 
     assert result == {
         "ok": True,
-        "status": "success",
+        "status": "configured",
         "user_id": "newapi-user-id",
         "token_id": "newapi-token-id",
         "token": "sk-user-token",

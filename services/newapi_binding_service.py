@@ -65,7 +65,7 @@ class NewAPIBindingService:
                 return self._failed(message="NewAPI provisioning returned an invalid response")
             return {
                 "ok": True,
-                "status": "success",
+                "status": "configured",
                 "user_id": _clean(data.get("user_id")),
                 "token_id": _clean(data.get("token_id")),
                 "token": _clean(data.get("token")),
