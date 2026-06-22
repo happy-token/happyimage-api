@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+DEFAULT_NEWAPI_URL = "https://gateway.happy-token.cn"
+
 
 def _clean(value: object) -> str:
     return str(value or "").strip()
@@ -33,6 +35,8 @@ class NewAPIBindingService:
                 "ok": False,
                 "status": "pending",
                 "message": "NewAPI provisioning endpoint is not configured",
+                "base_url": self._normalize_url(settings.get("base_url"), default=DEFAULT_NEWAPI_URL),
+                "management_url": self._normalize_url(settings.get("management_url"), default=DEFAULT_NEWAPI_URL),
             }
 
         session = self._make_session()
@@ -51,7 +55,7 @@ class NewAPIBindingService:
                     "name": _clean(name),
                     "token_name": _clean(settings.get("token_name")) or "HappyImage Default",
                 },
-                timeout=30,
+                timeout=20,
             )
             status_code = int(getattr(response, "status_code", 0) or 0)
             if status_code != 200:
@@ -65,9 +69,13 @@ class NewAPIBindingService:
                 "user_id": _clean(data.get("user_id")),
                 "token_id": _clean(data.get("token_id")),
                 "token": _clean(data.get("token")),
-                "base_url": self._normalize_url(data.get("base_url") or settings.get("base_url")),
+                "base_url": self._normalize_url(data.get("base_url") or settings.get("base_url"), default=DEFAULT_NEWAPI_URL),
                 "management_url": self._normalize_url(
-                    data.get("management_url") or settings.get("management_url") or data.get("base_url") or settings.get("base_url")
+                    data.get("management_url")
+                    or settings.get("management_url")
+                    or data.get("base_url")
+                    or settings.get("base_url"),
+                    default=DEFAULT_NEWAPI_URL,
                 ),
             }
         except Exception:
@@ -95,8 +103,8 @@ class NewAPIBindingService:
         return config.get_newapi_binding_settings()
 
     @staticmethod
-    def _normalize_url(value: object) -> str:
-        return _clean(value).rstrip("/")
+    def _normalize_url(value: object, *, default: str = "") -> str:
+        return (_clean(value) or default).rstrip("/")
 
     @staticmethod
     def _response_json(response: object) -> object:
@@ -118,3 +126,6 @@ class NewAPIBindingService:
         if http_status is not None:
             result["http_status"] = http_status
         return result
+
+
+newapi_binding_service = NewAPIBindingService()

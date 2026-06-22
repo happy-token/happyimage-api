@@ -4,7 +4,7 @@ from unittest import mock
 
 from services.auth_service import AuthService
 from services.config import ConfigStore, CONFIG_FILE
-from services.newapi_binding_service import NewAPIBindingService
+from services.newapi_binding_service import NewAPIBindingService, newapi_binding_service
 from services.storage.json_storage import JSONStorageBackend
 
 
@@ -161,6 +161,8 @@ def test_newapi_binding_returns_pending_when_disabled_or_unconfigured():
         "ok": False,
         "status": "pending",
         "message": "NewAPI provisioning endpoint is not configured",
+        "base_url": "https://gateway.happy-token.cn",
+        "management_url": "https://gateway.happy-token.cn/manage",
     }
 
     service = NewAPIBindingService(
@@ -177,6 +179,36 @@ def test_newapi_binding_returns_pending_when_disabled_or_unconfigured():
 
     assert result["ok"] is False
     assert result["status"] == "pending"
+    assert result["base_url"] == "https://gateway.happy-token.cn"
+    assert result["management_url"] == "https://gateway.happy-token.cn/manage"
+
+
+def test_newapi_binding_pending_response_defaults_missing_urls():
+    service = NewAPIBindingService(
+        settings={
+            "enabled": False,
+            "base_url": "",
+            "management_url": "",
+            "provision_url": "",
+            "provision_secret": "",
+        },
+        session_factory=lambda: FakeSession(),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "pending",
+        "message": "NewAPI provisioning endpoint is not configured",
+        "base_url": "https://gateway.happy-token.cn",
+        "management_url": "https://gateway.happy-token.cn",
+    }
 
 
 def test_newapi_binding_calls_configured_provisioning_endpoint_with_auth_and_payload():
@@ -216,9 +248,13 @@ def test_newapi_binding_calls_configured_provisioning_endpoint_with_auth_and_pay
                 "name": "Creator",
                 "token_name": "HappyImage Default",
             },
-            "timeout": 30,
+            "timeout": 20,
         }
     ]
+
+
+def test_newapi_binding_exports_module_singleton():
+    assert isinstance(newapi_binding_service, NewAPIBindingService)
 
 
 def test_newapi_binding_closes_session():
@@ -293,3 +329,52 @@ def test_newapi_binding_non_200_failure_is_redacted():
     result_text = str(result)
     assert "provision-secret" not in result_text
     assert "sk-upstream-token" not in result_text
+
+
+def test_newapi_binding_exception_failure_is_redacted_and_closes_session():
+    session = FakeSession(error=RuntimeError("secret=provision-secret token=sk-exception-token"))
+    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "failed",
+        "message": "NewAPI provisioning request failed",
+    }
+    assert session.closed is True
+    result_text = str(result)
+    assert "provision-secret" not in result_text
+    assert "sk-exception-token" not in result_text
+
+
+def test_newapi_binding_missing_token_failure_is_redacted():
+    session = FakeSession(
+        FakeResponse(
+            200,
+            {"ok": True, "message": "secret=provision-secret token=sk-missing-token"},
+            text='{"ok":true,"message":"secret=provision-secret token=sk-missing-token"}',
+        )
+    )
+    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": False,
+        "status": "failed",
+        "message": "NewAPI provisioning returned an invalid response",
+    }
+    result_text = str(result)
+    assert "provision-secret" not in result_text
+    assert "sk-missing-token" not in result_text
