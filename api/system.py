@@ -10,10 +10,18 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from api.support import require_admin, require_identity, resolve_image_base_url, resolve_identity_for_request
+from api.support import (
+    require_admin,
+    require_identity,
+    resolve_image_base_url,
+    resolve_identity_for_request,
+)
 from services.auth_service import auth_service
 from services.config import config
-from services.image_access_service import IMAGE_ACCESS_TOKEN_PARAM, verify_image_access_token
+from services.image_access_service import (
+    IMAGE_ACCESS_TOKEN_PARAM,
+    verify_image_access_token,
+)
 from services.image_service import (
     compress_images,
     delete_images,
@@ -42,22 +50,29 @@ class ImageDeleteRequest(BaseModel):
     end_date: str = ""
     all_matching: bool = False
 
+
 class ImageDownloadRequest(BaseModel):
     paths: list[str]
 
+
 class ImageDownloadTokenRequest(BaseModel):
     paths: list[str] = []
+
 
 class ImageAccessLinkRequest(BaseModel):
     path: str = ""
     url: str = ""
 
+
 class ImageTagsRequest(BaseModel):
     path: str
     tags: list[str]
 
+
 class LogDeleteRequest(BaseModel):
     ids: list[str] = []
+
+
 class PasswordLoginRequest(BaseModel):
     email: str = ""
     password: str = ""
@@ -91,18 +106,36 @@ class UserKeyUpdateRequest(BaseModel):
     watermark_unlocked: bool | None = None
 
 
-def _auth_identity_response(identity: dict[str, object], access_token: str, app_version: str) -> dict[str, object]:
+def _auth_identity_response(
+    identity: dict[str, object], access_token: str, app_version: str
+) -> dict[str, object]:
     role = "admin" if identity.get("role") == "admin" else "user"
     subject_id = str(identity.get("id") or "").strip() or role
-    name = str(identity.get("name") or "").strip() or ("管理员" if role == "admin" else "创作者")
+    name = str(identity.get("name") or "").strip() or (
+        "管理员" if role == "admin" else "创作者"
+    )
     watermark_label = str(identity.get("watermark_label") or "").strip()
-    watermark_unlocked = role == "admin" or bool(identity.get("watermark_unlocked", False))
+    watermark_unlocked = role == "admin" or bool(
+        identity.get("watermark_unlocked", False)
+    )
     model_provider = str(identity.get("model_provider") or "").strip()
     model_base_url = str(identity.get("model_base_url") or "").strip().rstrip("/")
-    model_api_key_configured = bool(identity.get("model_api_key_configured")) or bool(str(identity.get("model_api_key") or "").strip())
-    model_gateway_enabled = model_gateway_service.is_enabled(model_base_url, str(identity.get("model_api_key") or ""))
-    model_providers = identity.get("model_providers") if isinstance(identity.get("model_providers"), list) else []
-    preferences = identity.get("preferences") if isinstance(identity.get("preferences"), dict) else {}
+    model_api_key_configured = bool(identity.get("model_api_key_configured")) or bool(
+        str(identity.get("model_api_key") or "").strip()
+    )
+    model_gateway_enabled = model_gateway_service.is_enabled(
+        model_base_url, str(identity.get("model_api_key") or "")
+    )
+    model_providers = (
+        identity.get("model_providers")
+        if isinstance(identity.get("model_providers"), list)
+        else []
+    )
+    preferences = (
+        identity.get("preferences")
+        if isinstance(identity.get("preferences"), dict)
+        else {}
+    )
     external_identity = {
         key: str(identity.get(key) or "").strip()
         for key in ("auth_provider", "auth_subject", "email")
@@ -143,7 +176,9 @@ def _auth_identity_response(identity: dict[str, object], access_token: str, app_
     }
 
 
-def _auth_login_response(identity: dict[str, object], access_token: str, app_version: str) -> JSONResponse:
+def _auth_login_response(
+    identity: dict[str, object], access_token: str, app_version: str
+) -> JSONResponse:
     payload = _auth_identity_response(identity, access_token, app_version)
     try:
         _session_token, cookie = web_session_service.create_session(identity)
@@ -155,10 +190,14 @@ def _auth_login_response(identity: dict[str, object], access_token: str, app_ver
 
 
 def _test_login_token(email: str, password: str) -> str:
-    enabled = str(
-        os.getenv("HAPPYTOKEN_TEST_ACCOUNTS_ENABLED")
-        or config.data.get("test_accounts_enabled", "false")
-    ).strip().lower()
+    enabled = (
+        str(
+            os.getenv("HAPPYTOKEN_TEST_ACCOUNTS_ENABLED")
+            or config.data.get("test_accounts_enabled", "false")
+        )
+        .strip()
+        .lower()
+    )
     if enabled in {"0", "false", "no", "off"}:
         return ""
     normalized_email = email.strip().lower()
@@ -201,14 +240,18 @@ def _check_auth_rate_limit(request: Request, scope: str, subject: str = "") -> N
     cutoff = now - _AUTH_ATTEMPT_WINDOW_SECONDS
     attempts = [item for item in _AUTH_ATTEMPTS.get(key, []) if item >= cutoff]
     if len(attempts) >= _AUTH_ATTEMPT_LIMIT:
-        raise HTTPException(status_code=429, detail={"error": "尝试次数过多，请稍后再试"})
+        raise HTTPException(
+            status_code=429, detail={"error": "尝试次数过多，请稍后再试"}
+        )
     attempts.append(now)
     _AUTH_ATTEMPTS[key] = attempts
 
 
 def _create_download_token(identity: dict[str, object]) -> str:
     now = time.time()
-    expired = [key for key, (expires_at, _) in _DOWNLOAD_TOKENS.items() if expires_at < now]
+    expired = [
+        key for key, (expires_at, _) in _DOWNLOAD_TOKENS.items() if expires_at < now
+    ]
     for key in expired:
         _DOWNLOAD_TOKENS.pop(key, None)
     token = secrets.token_urlsafe(24)
@@ -226,12 +269,16 @@ def _require_download_admin(
         item = _DOWNLOAD_TOKENS.get(token)
         if item is None or item[0] < time.time():
             _DOWNLOAD_TOKENS.pop(token, None)
-            raise HTTPException(status_code=401, detail={"error": "下载链接已失效，请重新点击下载"})
+            raise HTTPException(
+                status_code=401, detail={"error": "下载链接已失效，请重新点击下载"}
+            )
         identity = item[1]
     else:
         identity = resolve_identity_for_request(request, authorization)
     if identity.get("role") != "admin":
-        raise HTTPException(status_code=403, detail={"error": "需要管理员权限才能执行这个操作"})
+        raise HTTPException(
+            status_code=403, detail={"error": "需要管理员权限才能执行这个操作"}
+        )
     return identity
 
 
@@ -248,29 +295,43 @@ def _extract_image_access_path(body: ImageAccessLinkRequest) -> str:
 
 
 def _registration_enabled() -> bool:
-    enabled = str(
-        os.getenv("HAPPYTOKEN_REGISTRATION_ENABLED")
-        or config.data.get("registration_enabled", "false")
-    ).strip().lower()
+    enabled = (
+        str(
+            os.getenv("HAPPYTOKEN_REGISTRATION_ENABLED")
+            or config.data.get("registration_enabled", "false")
+        )
+        .strip()
+        .lower()
+    )
     return enabled not in {"0", "false", "no", "off"}
 
 
 def _local_password_login_enabled() -> bool:
-    enabled = str(
-        os.getenv("HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED")
-        or config.data.get("local_password_login_enabled", "false")
-    ).strip().lower()
+    enabled = (
+        str(
+            os.getenv("HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED")
+            or config.data.get("local_password_login_enabled", "false")
+        )
+        .strip()
+        .lower()
+    )
     return enabled in {"1", "true", "yes", "on"}
 
 
 def _normalize_register_name(body: RegisterRequest) -> str:
     name = (body.name or body.email or "").strip()
     if len(name) < 2:
-        raise HTTPException(status_code=400, detail={"error": "账号名称至少需要 2 个字符"})
+        raise HTTPException(
+            status_code=400, detail={"error": "账号名称至少需要 2 个字符"}
+        )
     if len(name) > 64:
-        raise HTTPException(status_code=400, detail={"error": "账号名称不能超过 64 个字符"})
+        raise HTTPException(
+            status_code=400, detail={"error": "账号名称不能超过 64 个字符"}
+        )
     if name.lower() in {"admin", "administrator", "root"}:
-        raise HTTPException(status_code=400, detail={"error": "这个账号名称不可用于注册"})
+        raise HTTPException(
+            status_code=400, detail={"error": "这个账号名称不可用于注册"}
+        )
     return name
 
 
@@ -280,13 +341,17 @@ def _normalize_register_password(body: RegisterRequest) -> str:
     if len(password) < 6:
         raise HTTPException(status_code=400, detail={"error": "密码至少需要 6 个字符"})
     if len(password) > 128:
-        raise HTTPException(status_code=400, detail={"error": "密码不能超过 128 个字符"})
+        raise HTTPException(
+            status_code=400, detail={"error": "密码不能超过 128 个字符"}
+        )
     if confirm_password and password != confirm_password:
         raise HTTPException(status_code=400, detail={"error": "两次输入的密码不一致"})
     return password
 
 
-def _normalize_user_preferences(raw_preferences: dict[str, object]) -> dict[str, object]:
+def _normalize_user_preferences(
+    raw_preferences: dict[str, object],
+) -> dict[str, object]:
     allowed_string_values = {
         "theme": {"system", "light", "dark"},
         "language": {"system", "zh-CN", "en-US"},
@@ -380,43 +445,85 @@ def create_router(app_version: str) -> APIRouter:
         return _auth_identity_response(identity, "", app_version)
 
     @router.patch("/api/auth/profile")
-    async def update_auth_profile(body: UserProfileUpdateRequest, authorization: str | None = Header(default=None)):
+    async def update_auth_profile(
+        body: UserProfileUpdateRequest, authorization: str | None = Header(default=None)
+    ):
         identity = require_identity(authorization)
         role = "admin" if identity.get("role") == "admin" else "user"
         user_id = str(identity.get("id") or "").strip()
         if not user_id:
-            raise HTTPException(status_code=401, detail={"error": "用户身份无效，请重新登录"})
+            raise HTTPException(
+                status_code=401, detail={"error": "用户身份无效，请重新登录"}
+            )
         updates: dict[str, object] = {}
         if body.watermark_label is not None and role == "user":
             watermark_label = body.watermark_label.strip()
             if len(watermark_label) > 64:
-                raise HTTPException(status_code=400, detail={"error": "水印标签不能超过 64 个字符"})
+                raise HTTPException(
+                    status_code=400, detail={"error": "水印标签不能超过 64 个字符"}
+                )
             updates["watermark_label"] = watermark_label
         if body.model_provider is not None and role == "user":
             model_provider = body.model_provider.strip() or "newapi"
             if len(model_provider) > 32:
-                raise HTTPException(status_code=400, detail={"error": "供应商类型不能超过 32 个字符"})
+                raise HTTPException(
+                    status_code=400, detail={"error": "供应商类型不能超过 32 个字符"}
+                )
             updates["model_provider"] = model_provider
         if body.model_base_url is not None and role == "user":
             model_base_url = body.model_base_url.strip().rstrip("/")
-            if model_base_url and not (model_base_url.startswith("http://") or model_base_url.startswith("https://")):
-                raise HTTPException(status_code=400, detail={"error": "Base URL 必须以 http:// 或 https:// 开头"})
+            if model_base_url and not (
+                model_base_url.startswith("http://")
+                or model_base_url.startswith("https://")
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail={"error": "Base URL 必须以 http:// 或 https:// 开头"},
+                )
             if len(model_base_url) > 512:
-                raise HTTPException(status_code=400, detail={"error": "Base URL 不能超过 512 个字符"})
+                raise HTTPException(
+                    status_code=400, detail={"error": "Base URL 不能超过 512 个字符"}
+                )
             updates["model_base_url"] = model_base_url
         if body.model_api_key is not None and role == "user":
             updates["model_api_key"] = body.model_api_key.strip()
         if body.model_providers is not None and role == "user":
             model_providers: list[dict[str, object]] = []
             for raw_provider in body.model_providers:
-                provider_type = str(raw_provider.get("type") or raw_provider.get("model_provider") or "newapi").strip() or "newapi"
-                base_url = str(raw_provider.get("base_url") or raw_provider.get("model_base_url") or "").strip().rstrip("/")
+                provider_type = (
+                    str(
+                        raw_provider.get("type")
+                        or raw_provider.get("model_provider")
+                        or "newapi"
+                    ).strip()
+                    or "newapi"
+                )
+                base_url = (
+                    str(
+                        raw_provider.get("base_url")
+                        or raw_provider.get("model_base_url")
+                        or ""
+                    )
+                    .strip()
+                    .rstrip("/")
+                )
                 if len(provider_type) > 32:
-                    raise HTTPException(status_code=400, detail={"error": "供应商类型不能超过 32 个字符"})
-                if base_url and not (base_url.startswith("http://") or base_url.startswith("https://")):
-                    raise HTTPException(status_code=400, detail={"error": "Base URL 必须以 http:// 或 https:// 开头"})
+                    raise HTTPException(
+                        status_code=400,
+                        detail={"error": "供应商类型不能超过 32 个字符"},
+                    )
+                if base_url and not (
+                    base_url.startswith("http://") or base_url.startswith("https://")
+                ):
+                    raise HTTPException(
+                        status_code=400,
+                        detail={"error": "Base URL 必须以 http:// 或 https:// 开头"},
+                    )
                 if len(base_url) > 512:
-                    raise HTTPException(status_code=400, detail={"error": "Base URL 不能超过 512 个字符"})
+                    raise HTTPException(
+                        status_code=400,
+                        detail={"error": "Base URL 不能超过 512 个字符"},
+                    )
                 if not base_url:
                     continue
                 model_providers.append(
@@ -425,7 +532,9 @@ def create_router(app_version: str) -> APIRouter:
                         "type": provider_type,
                         "base_url": base_url,
                         "api_key": str(raw_provider.get("api_key") or "").strip(),
-                        "api_key_configured": bool(raw_provider.get("api_key_configured")),
+                        "api_key_configured": bool(
+                            raw_provider.get("api_key_configured")
+                        ),
                         "selected": bool(raw_provider.get("selected")),
                     }
                 )
@@ -435,7 +544,9 @@ def create_router(app_version: str) -> APIRouter:
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "还没有检测到改动"})
         try:
-            item = await run_in_threadpool(auth_service.update_key, user_id, updates, role=role)
+            item = await run_in_threadpool(
+                auth_service.update_key, user_id, updates, role=role
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         if item is None:
@@ -454,7 +565,9 @@ def create_router(app_version: str) -> APIRouter:
         return {"config": config.get()}
 
     @router.post("/api/settings")
-    async def save_settings(body: SettingsUpdateRequest, authorization: str | None = Header(default=None)):
+    async def save_settings(
+        body: SettingsUpdateRequest, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         try:
             return {"config": config.update(body.model_dump(mode="python"))}
@@ -467,7 +580,9 @@ def create_router(app_version: str) -> APIRouter:
         return {"items": await run_in_threadpool(auth_service.list_keys, "user")}
 
     @router.post("/api/auth/users")
-    async def create_user_key(body: UserKeyCreateRequest, authorization: str | None = Header(default=None)):
+    async def create_user_key(
+        body: UserKeyCreateRequest, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         try:
             if body.key is not None and body.key.strip():
@@ -479,25 +594,42 @@ def create_router(app_version: str) -> APIRouter:
                 )
                 raw_key = body.key.strip()
             else:
-                item, raw_key = await run_in_threadpool(auth_service.create_key, role="user", name=body.name)
+                item, raw_key = await run_in_threadpool(
+                    auth_service.create_key, role="user", name=body.name
+                )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
-        return {"item": item, "key": raw_key, "items": await run_in_threadpool(auth_service.list_keys, "user")}
+        return {
+            "item": item,
+            "key": raw_key,
+            "items": await run_in_threadpool(auth_service.list_keys, "user"),
+        }
 
     @router.post("/api/auth/users/{key_id}")
-    async def update_user_key(key_id: str, body: UserKeyUpdateRequest, authorization: str | None = Header(default=None)):
+    async def update_user_key(
+        key_id: str,
+        body: UserKeyUpdateRequest,
+        authorization: str | None = Header(default=None),
+    ):
         require_admin(authorization)
         updates = body.model_dump(mode="python", exclude_unset=True)
         try:
-            item = await run_in_threadpool(auth_service.update_key, key_id, updates, role="user")
+            item = await run_in_threadpool(
+                auth_service.update_key, key_id, updates, role="user"
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         if item is None:
             raise HTTPException(status_code=404, detail={"error": "账号不存在"})
-        return {"item": item, "items": await run_in_threadpool(auth_service.list_keys, "user")}
+        return {
+            "item": item,
+            "items": await run_in_threadpool(auth_service.list_keys, "user"),
+        }
 
     @router.delete("/api/auth/users/{key_id}")
-    async def delete_user_key(key_id: str, authorization: str | None = Header(default=None)):
+    async def delete_user_key(
+        key_id: str, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         removed = await run_in_threadpool(auth_service.delete_key, key_id, role="user")
         if not removed:
@@ -505,7 +637,12 @@ def create_router(app_version: str) -> APIRouter:
         return {"items": await run_in_threadpool(auth_service.list_keys, "user")}
 
     @router.get("/api/images")
-    async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
+    async def get_images(
+        request: Request,
+        start_date: str = "",
+        end_date: str = "",
+        authorization: str | None = Header(default=None),
+    ):
         identity = require_identity(authorization)
         include_all = identity.get("role") == "admin"
         return list_images(
@@ -517,12 +654,18 @@ def create_router(app_version: str) -> APIRouter:
         )
 
     @router.post("/api/images/access-link")
-    async def create_image_access_link(body: ImageAccessLinkRequest, request: Request, authorization: str | None = Header(default=None)):
+    async def create_image_access_link(
+        body: ImageAccessLinkRequest,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ):
         identity = require_identity(authorization)
         image_path = _extract_image_access_path(body)
         include_all = identity.get("role") == "admin"
         user_id = str(identity.get("id") or "")
-        image_items = image_storage_service.list_items(resolve_image_base_url(request), include_all=True)
+        image_items = image_storage_service.list_items(
+            resolve_image_base_url(request), include_all=True
+        )
         for item in image_items:
             if str(item.get("path") or item.get("rel") or "") == image_path:
                 owner_id = str(item.get("owner_id") or "").strip()
@@ -558,12 +701,21 @@ def create_router(app_version: str) -> APIRouter:
         return get_thumbnail_response(image_path)
 
     @router.post("/api/images/delete")
-    async def delete_images_endpoint(body: ImageDeleteRequest, authorization: str | None = Header(default=None)):
+    async def delete_images_endpoint(
+        body: ImageDeleteRequest, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
-        return delete_images(body.paths, start_date=body.start_date.strip(), end_date=body.end_date.strip(), all_matching=body.all_matching)
+        return delete_images(
+            body.paths,
+            start_date=body.start_date.strip(),
+            end_date=body.end_date.strip(),
+            all_matching=body.all_matching,
+        )
 
     @router.post("/api/images/download")
-    async def download_images_endpoint(body: ImageDownloadRequest, authorization: str | None = Header(default=None)):
+    async def download_images_endpoint(
+        body: ImageDownloadRequest, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         buf = download_images_zip(body.paths)
         return StreamingResponse(
@@ -573,11 +725,17 @@ def create_router(app_version: str) -> APIRouter:
         )
 
     @router.post("/api/images/download-token")
-    async def create_image_download_token(body: ImageDownloadTokenRequest, authorization: str | None = Header(default=None)):
+    async def create_image_download_token(
+        body: ImageDownloadTokenRequest,
+        authorization: str | None = Header(default=None),
+    ):
         identity = require_admin(authorization)
         if not body.paths:
             raise HTTPException(status_code=400, detail={"error": "paths is required"})
-        return {"token": _create_download_token(identity), "expires_in": _DOWNLOAD_TOKEN_TTL_SECONDS}
+        return {
+            "token": _create_download_token(identity),
+            "expires_in": _DOWNLOAD_TOKEN_TTL_SECONDS,
+        }
 
     @router.get("/api/images/download")
     async def download_images_link_endpoint(
@@ -607,12 +765,25 @@ def create_router(app_version: str) -> APIRouter:
         return get_image_download_response(image_path)
 
     @router.get("/api/logs")
-    async def get_logs(type: str = "", start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):
+    async def get_logs(
+        type: str = "",
+        start_date: str = "",
+        end_date: str = "",
+        authorization: str | None = Header(default=None),
+    ):
         require_admin(authorization)
-        return {"items": log_service.list(type=type.strip(), start_date=start_date.strip(), end_date=end_date.strip())}
+        return {
+            "items": log_service.list(
+                type=type.strip(),
+                start_date=start_date.strip(),
+                end_date=end_date.strip(),
+            )
+        }
 
     @router.post("/api/logs/delete")
-    async def delete_logs(body: LogDeleteRequest, authorization: str | None = Header(default=None)):
+    async def delete_logs(
+        body: LogDeleteRequest, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         return log_service.delete(body.ids)
 
@@ -626,12 +797,16 @@ def create_router(app_version: str) -> APIRouter:
         }
 
     @router.post("/api/image-storage/test")
-    async def test_image_storage_endpoint(authorization: str | None = Header(default=None)):
+    async def test_image_storage_endpoint(
+        authorization: str | None = Header(default=None),
+    ):
         require_admin(authorization)
         return {"result": await run_in_threadpool(image_storage_service.test_webdav)}
 
     @router.post("/api/image-storage/sync")
-    async def sync_image_storage_endpoint(authorization: str | None = Header(default=None)):
+    async def sync_image_storage_endpoint(
+        authorization: str | None = Header(default=None),
+    ):
         require_admin(authorization)
         try:
             return {"result": await run_in_threadpool(image_storage_service.sync_all)}
@@ -644,7 +819,9 @@ def create_router(app_version: str) -> APIRouter:
         return {"tags": get_all_tags()}
 
     @router.post("/api/images/tags")
-    async def update_image_tags(body: ImageTagsRequest, authorization: str | None = Header(default=None)):
+    async def update_image_tags(
+        body: ImageTagsRequest, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         rel = body.path.strip().lstrip("/")
         if not rel:
@@ -653,7 +830,9 @@ def create_router(app_version: str) -> APIRouter:
         return {"ok": True, "tags": tags}
 
     @router.delete("/api/images/tags/{tag}")
-    async def delete_image_tag(tag: str, authorization: str | None = Header(default=None)):
+    async def delete_image_tag(
+        tag: str, authorization: str | None = Header(default=None)
+    ):
         require_admin(authorization)
         count = delete_tag(tag)
         return {"ok": True, "removed_from": count}
@@ -697,8 +876,8 @@ def create_router(app_version: str) -> APIRouter:
                 return public_json
             status_text = "正常" if healthy else "异常"
             return HTMLResponse(
-                "<!DOCTYPE html><html lang=\"zh\"><head><meta charset=\"UTF-8\">"
-                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+                '<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
                 "<title>Happy Token Health</title></head><body>"
                 f"<h1>Happy Token Health</h1><p>{status_text}</p>"
                 f"<p>v{app_version}</p></body></html>"
@@ -707,7 +886,10 @@ def create_router(app_version: str) -> APIRouter:
         require_admin(authorization)
         stats_json = {
             **public_json,
-            "storage": {"backend": storage.get_backend_info(), "health": storage_health},
+            "storage": {
+                "backend": storage.get_backend_info(),
+                "health": storage_health,
+            },
             "images": storage_stats(),
         }
         if format == "json":

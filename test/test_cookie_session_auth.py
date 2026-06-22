@@ -11,7 +11,9 @@ from services.auth_service import auth_service
 from services.config import config
 
 
-def _create_password_account(role: str = "admin", prefix: str = "account") -> tuple[str, str]:
+def _create_password_account(
+    role: str = "admin", prefix: str = "account"
+) -> tuple[str, str]:
     name = f"{prefix}-{uuid.uuid4().hex[:8]}"
     password = f"{prefix}-password-{uuid.uuid4().hex}"
     auth_service.create_key_with_value(role=role, name=name, key=password)
@@ -20,23 +22,26 @@ def _create_password_account(role: str = "admin", prefix: str = "account") -> tu
 
 def _login_password(client: TestClient, role: str = "admin", prefix: str = "account"):
     name, password = _create_password_account(role=role, prefix=prefix)
-    response = client.post("/api/auth/login", json={"email": name, "password": password})
+    response = client.post(
+        "/api/auth/login", json={"email": name, "password": password}
+    )
     assert response.status_code == 200, response.text
     return name, password, response
 
 
 def test_password_login_disabled_by_default_returns_unified_login_error():
     name, password = _create_password_account(role="admin", prefix="disabled-login")
-    with mock.patch.dict(
-        os.environ,
-        {"HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "false"},
-        clear=False,
-    ):
-        with TestClient(create_app()) as client:
-            response = client.post("/api/auth/login", json={"email": name, "password": password})
+    with mock.patch.dict(os.environ, {}, clear=False):
+        os.environ.pop("HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED", None)
+        with mock.patch.dict(config.data, {}, clear=False):
+            config.data.pop("local_password_login_enabled", None)
+            with TestClient(create_app()) as client:
+                response = client.post(
+                    "/api/auth/login", json={"email": name, "password": password}
+                )
 
-            assert response.status_code == 403, response.text
-            assert response.json()["detail"]["error"] == "请使用统一登录入口"
+                assert response.status_code == 403, response.text
+                assert response.json()["detail"]["error"] == "请使用统一登录入口"
 
 
 def test_password_login_can_be_enabled_for_emergency_ops():
@@ -165,13 +170,19 @@ def test_user_profile_can_update_watermark_label():
 
             user_name = f"profile-{uuid.uuid4().hex[:8]}"
             user_key = f"profile-key-{uuid.uuid4().hex}"
-            create_response = client.post("/api/auth/users", json={"name": user_name, "key": user_key})
+            create_response = client.post(
+                "/api/auth/users", json={"name": user_name, "key": user_key}
+            )
             assert create_response.status_code == 200, create_response.text
 
-            user_login_response = client.post("/api/auth/login", json={"email": user_name, "password": user_key})
+            user_login_response = client.post(
+                "/api/auth/login", json={"email": user_name, "password": user_key}
+            )
             assert user_login_response.status_code == 200, user_login_response.text
 
-            update_response = client.patch("/api/auth/profile", json={"watermark_label": "Happy Creator"})
+            update_response = client.patch(
+                "/api/auth/profile", json={"watermark_label": "Happy Creator"}
+            )
             assert update_response.status_code == 200, update_response.text
             payload = update_response.json()
             assert payload["user"]["watermark_label"] == "Happy Creator"
@@ -193,10 +204,14 @@ def test_user_profile_model_providers_can_be_selected_and_preserve_keys():
 
             user_name = f"provider-{uuid.uuid4().hex[:8]}"
             user_key = f"provider-key-{uuid.uuid4().hex}"
-            create_response = client.post("/api/auth/users", json={"name": user_name, "key": user_key})
+            create_response = client.post(
+                "/api/auth/users", json={"name": user_name, "key": user_key}
+            )
             assert create_response.status_code == 200, create_response.text
 
-            user_login_response = client.post("/api/auth/login", json={"email": user_name, "password": user_key})
+            user_login_response = client.post(
+                "/api/auth/login", json={"email": user_name, "password": user_key}
+            )
             assert user_login_response.status_code == 200, user_login_response.text
 
             save_response = client.patch(
@@ -221,7 +236,10 @@ def test_user_profile_model_providers_can_be_selected_and_preserve_keys():
                 },
             )
             assert save_response.status_code == 200, save_response.text
-            assert save_response.json()["user"]["model_base_url"] == "https://b.example.com/v1"
+            assert (
+                save_response.json()["user"]["model_base_url"]
+                == "https://b.example.com/v1"
+            )
 
             switch_response = client.patch(
                 "/api/auth/profile",
@@ -248,7 +266,9 @@ def test_user_profile_model_providers_can_be_selected_and_preserve_keys():
             payload = switch_response.json()
             assert payload["user"]["model_base_url"] == "https://a.example.com/v1"
             assert payload["user"]["model_api_key_configured"] is True
-            assert [item["selected"] for item in payload["user"]["model_providers"]] == [True, False]
+            assert [
+                item["selected"] for item in payload["user"]["model_providers"]
+            ] == [True, False]
 
 
 def test_user_profile_preferences_sync_to_account():
@@ -262,8 +282,12 @@ def test_user_profile_preferences_sync_to_account():
         clear=False,
     ):
         with TestClient(create_app()) as client:
-            user_name, user_key = _create_password_account(role="user", prefix="prefs-user")
-            login_response = client.post("/api/auth/login", json={"email": user_name, "password": user_key})
+            user_name, user_key = _create_password_account(
+                role="user", prefix="prefs-user"
+            )
+            login_response = client.post(
+                "/api/auth/login", json={"email": user_name, "password": user_key}
+            )
             assert login_response.status_code == 200, login_response.text
 
             update_response = client.patch(
@@ -322,7 +346,10 @@ def test_admin_profile_can_sync_preferences_without_provider_fields():
             )
             assert update_response.status_code == 200, update_response.text
             payload = update_response.json()
-            assert payload["user"]["preferences"] == {"theme": "light", "language": "zh-CN"}
+            assert payload["user"]["preferences"] == {
+                "theme": "light",
+                "language": "zh-CN",
+            }
             assert payload["user"]["model_base_url"] == ""
 
 
@@ -338,9 +365,13 @@ def test_test_user_password_login_is_case_insensitive():
         clear=False,
     ):
         fake_identity = {"id": "user", "name": "user", "role": "user"}
-        with mock.patch("api.support.auth_service.authenticate", return_value=fake_identity):
+        with mock.patch(
+            "api.support.auth_service.authenticate", return_value=fake_identity
+        ):
             with TestClient(create_app()) as client:
-                response = client.post("/api/auth/login", json={"email": "User", "password": "User"})
+                response = client.post(
+                    "/api/auth/login", json={"email": "User", "password": "User"}
+                )
 
                 assert response.status_code == 200, response.text
                 assert response.json()["role"] == "user"
@@ -365,7 +396,9 @@ def test_local_image_accepts_bearer_token_when_signed_link_is_missing(tmp_path):
             clear=False,
         ):
             with TestClient(create_app()) as client:
-                _, password = _create_password_account(role="admin", prefix="image-bearer")
+                _, password = _create_password_account(
+                    role="admin", prefix="image-bearer"
+                )
                 response = client.get(
                     f"/images/{image_rel}",
                     headers={"Authorization": f"Bearer {password}"},
