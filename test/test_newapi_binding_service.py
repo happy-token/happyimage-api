@@ -116,8 +116,12 @@ class FakeResponse:
 
 
 class FakeSession:
-    def __init__(self, response: FakeResponse | None = None, error: Exception | None = None):
-        self.response = response or FakeResponse(200, {"ok": True, "token": "sk-default"})
+    def __init__(
+        self, response: FakeResponse | None = None, error: Exception | None = None
+    ):
+        self.response = response or FakeResponse(
+            200, {"ok": True, "token": "sk-default"}
+        )
         self.error = error
         self.posts: list[dict[str, object]] = []
         self.closed = False
@@ -247,7 +251,9 @@ def test_newapi_binding_calls_configured_provisioning_endpoint_with_auth_and_pay
             },
         )
     )
-    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+    service = NewAPIBindingService(
+        settings=_enabled_settings(), session_factory=lambda: session
+    )
 
     service.ensure_default_token(
         provider="casdoor",
@@ -282,7 +288,9 @@ def test_newapi_binding_exports_module_singleton():
 
 def test_newapi_binding_closes_session():
     session = FakeSession()
-    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+    service = NewAPIBindingService(
+        settings=_enabled_settings(), session_factory=lambda: session
+    )
 
     service.ensure_default_token(
         provider="casdoor",
@@ -337,7 +345,9 @@ def test_newapi_binding_non_200_failure_is_redacted():
             text='{"message":"secret=provision-secret token=sk-upstream-token"}',
         )
     )
-    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+    service = NewAPIBindingService(
+        settings=_enabled_settings(), session_factory=lambda: session
+    )
 
     result = service.ensure_default_token(
         provider="casdoor",
@@ -355,8 +365,12 @@ def test_newapi_binding_non_200_failure_is_redacted():
 
 
 def test_newapi_binding_exception_failure_is_redacted_and_closes_session():
-    session = FakeSession(error=RuntimeError("secret=provision-secret token=sk-exception-token"))
-    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+    session = FakeSession(
+        error=RuntimeError("secret=provision-secret token=sk-exception-token")
+    )
+    service = NewAPIBindingService(
+        settings=_enabled_settings(), session_factory=lambda: session
+    )
 
     result = service.ensure_default_token(
         provider="casdoor",
@@ -380,7 +394,9 @@ def test_newapi_binding_session_factory_failure_is_redacted():
     def raise_session_error():
         raise RuntimeError("secret=provision-secret token=sk-session-token")
 
-    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=raise_session_error)
+    service = NewAPIBindingService(
+        settings=_enabled_settings(), session_factory=raise_session_error
+    )
 
     result = service.ensure_default_token(
         provider="casdoor",
@@ -407,7 +423,9 @@ def test_newapi_binding_missing_token_failure_is_redacted():
             text='{"ok":true,"message":"secret=provision-secret token=sk-missing-token"}',
         )
     )
-    service = NewAPIBindingService(settings=_enabled_settings(), session_factory=lambda: session)
+    service = NewAPIBindingService(
+        settings=_enabled_settings(), session_factory=lambda: session
+    )
 
     result = service.ensure_default_token(
         provider="casdoor",

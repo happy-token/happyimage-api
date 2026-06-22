@@ -30,9 +30,17 @@ class NewAPIBindingService:
         settings = self._settings or self._load_settings()
         provision_url = _clean(settings.get("provision_url"))
         provision_secret = _clean(settings.get("provision_secret"))
-        base_url = self._normalize_url(settings.get("base_url"), default=DEFAULT_NEWAPI_URL)
-        management_url = self._normalize_url(settings.get("management_url"), default=base_url)
-        if not bool(settings.get("enabled")) or not provision_url or not provision_secret:
+        base_url = self._normalize_url(
+            settings.get("base_url"), default=DEFAULT_NEWAPI_URL
+        )
+        management_url = self._normalize_url(
+            settings.get("management_url"), default=base_url
+        )
+        if (
+            not bool(settings.get("enabled"))
+            or not provision_url
+            or not provision_secret
+        ):
             return {
                 "ok": False,
                 "status": "pending",
@@ -56,7 +64,8 @@ class NewAPIBindingService:
                     "subject": _clean(subject),
                     "email": _clean(email),
                     "name": _clean(name),
-                    "token_name": _clean(settings.get("token_name")) or "HappyImage Default",
+                    "token_name": _clean(settings.get("token_name"))
+                    or "HappyImage Default",
                 },
                 timeout=20,
             )
@@ -64,15 +73,23 @@ class NewAPIBindingService:
             if status_code != 200:
                 return self._failed(status_code)
             data = self._response_json(response)
-            if not isinstance(data, dict) or data.get("ok") is not True or not _clean(data.get("token")):
-                return self._failed(message="NewAPI provisioning returned an invalid response")
+            if (
+                not isinstance(data, dict)
+                or data.get("ok") is not True
+                or not _clean(data.get("token"))
+            ):
+                return self._failed(
+                    message="NewAPI provisioning returned an invalid response"
+                )
             return {
                 "ok": True,
                 "status": "configured",
                 "user_id": _clean(data.get("user_id")),
                 "token_id": _clean(data.get("token_id")),
                 "token": _clean(data.get("token")),
-                "base_url": self._normalize_url(data.get("base_url") or base_url, default=DEFAULT_NEWAPI_URL),
+                "base_url": self._normalize_url(
+                    data.get("base_url") or base_url, default=DEFAULT_NEWAPI_URL
+                ),
                 "management_url": self._normalize_url(
                     data.get("management_url")
                     or management_url
@@ -121,7 +138,9 @@ class NewAPIBindingService:
             return {}
 
     @staticmethod
-    def _failed(http_status: int | None = None, *, message: str | None = None) -> dict[str, object]:
+    def _failed(
+        http_status: int | None = None, *, message: str | None = None
+    ) -> dict[str, object]:
         result: dict[str, object] = {
             "ok": False,
             "status": "failed",
