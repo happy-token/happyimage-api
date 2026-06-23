@@ -536,3 +536,26 @@ def test_logout_clear_cookie_matches_cross_site_secure_cookie_attributes():
     assert "Expires=Thu, 01 Jan 1970 00:00:00 GMT" in cookie
     assert "Secure" in cookie
     assert "SameSite=None" in cookie
+
+
+def test_logout_clear_cookie_uses_lax_for_http_test_origin():
+    app = FastAPI()
+    app.include_router(auth_oidc_api.create_router())
+
+    with mock.patch.dict(
+        os.environ,
+        {
+            "HAPPYTOKEN_API_BASE_URL": "http://101.96.195.224",
+            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://101.96.195.224:3000",
+            "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
+        },
+        clear=False,
+    ):
+        response = TestClient(app).post("/api/auth/logout")
+
+    assert response.status_code == 200, response.text
+    cookie = response.headers["set-cookie"]
+    assert "happytoken_session=" in cookie
+    assert "Max-Age=0" in cookie
+    assert "Secure" not in cookie
+    assert "SameSite=Lax" in cookie

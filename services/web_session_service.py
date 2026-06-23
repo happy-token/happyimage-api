@@ -13,6 +13,7 @@ import json
 import time
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 from typing import Any
+from urllib.parse import urlparse
 
 from services.config import config
 
@@ -149,6 +150,18 @@ class WebSessionService:
     # Cookie construction
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cookie_uses_secure() -> bool:
+        return config.api_base_url.startswith("https://")
+
+    @classmethod
+    def _cookie_same_site(cls) -> str:
+        frontend = config.frontend_base_url
+        frontend_scheme = urlparse(frontend).scheme if frontend else ""
+        if not cls._cookie_uses_secure() or frontend_scheme != "https":
+            return "Lax"
+        return "None"
+
     def make_set_cookie_header(self, token: str) -> str:
         """Build a Set-Cookie header value for the session cookie."""
         parts = [
@@ -156,13 +169,9 @@ class WebSessionService:
             "HttpOnly",
             "Path=/",
         ]
-        if config.api_base_url.startswith("https://"):
+        if self._cookie_uses_secure():
             parts.append("Secure")
-        frontend = config.frontend_base_url
-        if frontend and not frontend.startswith("http://127.") and not frontend.startswith("http://localhost"):
-            parts.append("SameSite=None")
-        else:
-            parts.append("SameSite=Lax")
+        parts.append(f"SameSite={self._cookie_same_site()}")
         parts.append(f"Max-Age={self.max_age}")
         return "; ".join(parts)
 
@@ -175,13 +184,9 @@ class WebSessionService:
             "Max-Age=0",
             "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
         ]
-        if config.api_base_url.startswith("https://"):
+        if self._cookie_uses_secure():
             parts.append("Secure")
-        frontend = config.frontend_base_url
-        if frontend and not frontend.startswith("http://127.") and not frontend.startswith("http://localhost"):
-            parts.append("SameSite=None")
-        else:
-            parts.append("SameSite=Lax")
+        parts.append(f"SameSite={self._cookie_same_site()}")
         return "; ".join(parts)
 
     # ------------------------------------------------------------------
