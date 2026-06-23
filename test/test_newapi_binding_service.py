@@ -17,6 +17,7 @@ def test_newapi_binding_settings_from_env():
             "HAPPYTOKEN_NEWAPI_PROVISION_URL": "http://newapi:3000/api/internal/happyimage/bind-token",
             "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "secret",
             "HAPPYTOKEN_NEWAPI_TOKEN_NAME": "HappyImage Default",
+            "HAPPYTOKEN_NEWAPI_SQL_DSN": "",
         },
         clear=False,
     ):
@@ -29,6 +30,8 @@ def test_newapi_binding_settings_from_env():
         "provision_url": "http://newapi:3000/api/internal/happyimage/bind-token",
         "provision_secret_configured": True,
         "provision_secret": "secret",
+        "sql_dsn": "",
+        "sql_dsn_configured": False,
         "token_name": "HappyImage Default",
         "enabled": True,
     }
@@ -45,6 +48,51 @@ def test_newapi_binding_defaults_to_pending_safe_values():
     assert settings["enabled"] is False
     assert settings["provision_secret"] == ""
     assert settings["provision_secret_configured"] is False
+    assert settings["sql_dsn"] == ""
+    assert settings["sql_dsn_configured"] is False
+
+
+def test_newapi_binding_settings_enable_direct_sql_from_env():
+    with mock.patch.dict(
+        "os.environ",
+        {
+            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "",
+            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "",
+            "HAPPYTOKEN_NEWAPI_SQL_DSN": "postgresql://newapi:secret@postgres:5432/new-api",
+        },
+        clear=False,
+    ):
+        store = ConfigStore(CONFIG_FILE)
+        settings = store.get_newapi_binding_settings()
+
+    assert settings["enabled"] is True
+    assert settings["sql_dsn"] == "postgresql://newapi:secret@postgres:5432/new-api"
+    assert settings["sql_dsn_configured"] is True
+
+
+def test_newapi_binding_settings_accept_legacy_happyimage_env():
+    with mock.patch.dict(
+        "os.environ",
+        {
+            "HAPPYTOKEN_NEWAPI_BASE_URL": "",
+            "HAPPYTOKEN_NEWAPI_MANAGEMENT_URL": "",
+            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "",
+            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "",
+            "HAPPYTOKEN_NEWAPI_SQL_DSN": "",
+            "HAPPYIMAGE_NEWAPI_BASE_URL": "https://legacy-gateway.example",
+            "HAPPYIMAGE_NEWAPI_MANAGEMENT_URL": "https://legacy-gateway.example/manage",
+            "HAPPYIMAGE_NEWAPI_SQL_DSN": "postgresql://newapi:secret@127.0.0.1:15433/new-api",
+        },
+        clear=False,
+    ):
+        store = ConfigStore(CONFIG_FILE)
+        settings = store.get_newapi_binding_settings()
+
+    assert settings["base_url"] == "https://legacy-gateway.example"
+    assert settings["management_url"] == "https://legacy-gateway.example/manage"
+    assert settings["enabled"] is True
+    assert settings["sql_dsn"] == "postgresql://newapi:secret@127.0.0.1:15433/new-api"
+    assert settings["sql_dsn_configured"] is True
 
 
 def test_apply_newapi_default_provider_sets_selected_provider(tmp_path):
@@ -63,13 +111,15 @@ def test_apply_newapi_default_provider_sets_selected_provider(tmp_path):
     assert updated["model_base_url"] == "https://gateway.happy-token.cn"
     assert updated["model_api_key_configured"] is True
     assert updated["model_providers"] == [
-        {
-            "id": "newapi-default",
-            "type": "newapi",
-            "base_url": "https://gateway.happy-token.cn",
-            "api_key_configured": True,
-            "selected": True,
-        }
+            {
+                "id": "newapi-default",
+                "type": "newapi",
+                "protocol": "openai",
+                "base_url": "https://gateway.happy-token.cn",
+                "models": [],
+                "api_key_configured": True,
+                "selected": True,
+            }
     ]
 
 
@@ -136,6 +186,91 @@ class FakeSession:
         self.closed = True
 
 
+class FakeCursor:
+    def __init__(self, connection: "FakeSQLConnection") -> None:
+        self.connection = connection
+        self.next_result: tuple[object, ...] | None = None
+
+    def __enter__(self) -> "FakeCursor":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def execute(self, query: str, params: object = ()) -> None:
+        self.connection.queries.append((query, params))
+        compact = " ".join(query.split()).lower()
+        if "select id from users where oidc_id" in compact:
+            self.next_result = (
+                (self.connection.user_id,) if self.connection.user_id is not None else None
+            )
+        elif "select id, key from tokens" in compact:
+            self.next_result = (
+                (self.connection.token_id, self.connection.token)
+                if self.connection.token_id is not None
+                else None
+            )
+        elif "select access_token from users" in compact:
+            self.next_result = (self.connection.access_token,)
+        elif "insert into users" in compact:
+            self.next_result = (self.connection.created_user_id,)
+        elif "insert into tokens" in compact:
+            self.next_result = (self.connection.created_token_id,)
+        else:
+            self.next_result = None
+
+    def fetchone(self) -> tuple[object, ...] | None:
+        result = self.next_result
+        self.next_result = None
+        return result
+
+    def fetchall(self) -> list[tuple[object, ...]]:
+        return [
+            (
+                self.connection.token_id or self.connection.created_token_id,
+                self.connection.token,
+                1,
+                "HappyImage Default",
+                100,
+                0,
+                -1,
+                0,
+                True,
+                0,
+            )
+        ]
+
+
+class FakeSQLConnection:
+    def __init__(
+        self,
+        *,
+        user_id: int | None = 10,
+        token_id: int | None = 20,
+        token: str = "raw-token",
+    ) -> None:
+        self.user_id = user_id
+        self.token_id = token_id
+        self.token = token
+        self.access_token = "newapi-access-token"
+        self.created_user_id = 11
+        self.created_token_id = 21
+        self.queries: list[tuple[str, object]] = []
+        self.closed = False
+
+    def __enter__(self) -> "FakeSQLConnection":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def cursor(self) -> FakeCursor:
+        return FakeCursor(self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def _enabled_settings() -> dict[str, object]:
     return {
         "enabled": True,
@@ -144,6 +279,8 @@ def _enabled_settings() -> dict[str, object]:
         "provision_url": "http://newapi:3000/api/internal/happyimage/bind-token",
         "provision_secret": "provision-secret",
         "provision_secret_configured": True,
+        "sql_dsn": "",
+        "sql_dsn_configured": False,
         "token_name": "HappyImage Default",
     }
 
@@ -165,7 +302,7 @@ def test_newapi_binding_returns_pending_when_disabled_or_unconfigured():
         "ok": False,
         "status": "pending",
         "message": "NewAPI provisioning endpoint is not configured",
-        "base_url": "https://gateway.happy-token.cn",
+        "base_url": "https://gateway.happy-token.cn/v1",
         "management_url": "https://gateway.happy-token.cn/manage",
     }
 
@@ -183,8 +320,85 @@ def test_newapi_binding_returns_pending_when_disabled_or_unconfigured():
 
     assert result["ok"] is False
     assert result["status"] == "pending"
-    assert result["base_url"] == "https://gateway.happy-token.cn"
+    assert result["base_url"] == "https://gateway.happy-token.cn/v1"
     assert result["management_url"] == "https://gateway.happy-token.cn/manage"
+
+
+def test_newapi_binding_direct_sql_reuses_existing_user_and_token():
+    connection = FakeSQLConnection(user_id=1, token_id=2, token="existing-token")
+    service = NewAPIBindingService(
+        settings={
+            **_enabled_settings(),
+            "provision_url": "",
+            "provision_secret": "",
+            "sql_dsn": "postgresql://newapi:secret@postgres:5432/new-api",
+        },
+        sql_connect_factory=lambda dsn: connection,
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result == {
+        "ok": True,
+        "status": "configured",
+        "user_id": "1",
+        "token_id": "2",
+        "token": "sk-existing-token",
+        "access_token": "newapi-access-token",
+        "tokens": [
+            {
+                "id": 2,
+                "key": "sk-existing-token",
+                "status": 1,
+                "name": "HappyImage Default",
+                "created_time": 100,
+                "accessed_time": 0,
+                "expired_time": -1,
+                "remain_quota": 0,
+                "unlimited_quota": True,
+                "used_quota": 0,
+            }
+        ],
+        "base_url": "https://gateway.happy-token.cn/v1",
+        "management_url": "https://gateway.happy-token.cn/manage",
+    }
+    assert connection.closed is True
+    assert any("oidc_id" in query for query, _params in connection.queries)
+
+
+def test_newapi_binding_direct_sql_creates_missing_user_and_token():
+    connection = FakeSQLConnection(user_id=None, token_id=None)
+    service = NewAPIBindingService(
+        settings={
+            **_enabled_settings(),
+            "provision_url": "",
+            "provision_secret": "",
+            "sql_dsn": "postgresql://newapi:secret@postgres:5432/new-api",
+        },
+        sql_connect_factory=lambda dsn: connection,
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result["ok"] is True
+    assert result["status"] == "configured"
+    assert result["user_id"] == "11"
+    assert result["token_id"] == "21"
+    assert result["token"].startswith("sk-")
+    assert result["access_token"] == "newapi-access-token"
+    assert isinstance(result["tokens"], list)
+    assert any("insert into users" in query.lower() for query, _params in connection.queries)
+    assert any("insert into tokens" in query.lower() for query, _params in connection.queries)
 
 
 def test_newapi_binding_pending_response_defaults_missing_urls():
@@ -210,7 +424,7 @@ def test_newapi_binding_pending_response_defaults_missing_urls():
         "ok": False,
         "status": "pending",
         "message": "NewAPI provisioning endpoint is not configured",
-        "base_url": "https://gateway.happy-token.cn",
+        "base_url": "https://gateway.happy-token.cn/v1",
         "management_url": "https://gateway.happy-token.cn",
     }
 

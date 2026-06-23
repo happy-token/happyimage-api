@@ -157,7 +157,7 @@ uv run pytest -m live
 | `HAPPYTOKEN_API_BASE_URL` | 后端公开地址，用于构造 OIDC 回调 URL | `HAPPYTOKEN_BASE_URL` |
 | `HAPPYTOKEN_CORS_ORIGINS` | 允许的跨域来源，逗号分隔 | `HAPPYTOKEN_FRONTEND_BASE_URL` |
 
-图片生成不再使用后端 `.env` 中的模型网关变量兜底。普通用户需要在 Web 的“我的 -> 供应商”中配置 Base URL 和 API Key；后端只使用当前用户选中的供应商发起文生图 / 图生图请求。
+图片生成不再使用后端 `.env` 中的模型网关变量兜底。普通用户登录后会自动获得默认 HappyToken 供应商；用户也可以在 Web 的“我的 -> 供应商”中添加其他 OpenAI-compatible 供应商或自定义供应商。后端只使用当前用户选中的供应商发起文生图 / 图生图请求。
 
 ### 会话与 OIDC
 
@@ -331,7 +331,7 @@ curl http://localhost:8000/v1/images/edits \
 
 ### 图片生成错误提示
 
-Happy Token API 不再管理本地 image quota，也不会从 `.env` 读取模型网关密钥作为普通用户兜底。图片生成只使用当前用户在 Web“我的 -> 供应商”中选中的 Base URL 和 API Key。充值、余额、额度和计费由 NewAPI 或外部模型供应商负责。
+Happy Token API 不再管理本地 image quota，也不会从 `.env` 读取模型网关密钥作为普通用户兜底。图片生成只使用当前用户在 Web“我的 -> 供应商”中选中的 Base URL 和 API Key。默认 HappyToken 供应商由登录绑定流程生成，充值、余额、额度和计费由 NewAPI 或外部模型供应商负责。
 
 后端会把常见上游错误转换为可直接展示给用户的中文提示：
 
@@ -537,4 +537,23 @@ HAPPYTOKEN_NEWAPI_PROVISION_SECRET=replace-with-internal-secret
 HAPPYTOKEN_NEWAPI_TOKEN_NAME="HappyImage Default"
 ```
 
-If `HAPPYTOKEN_NEWAPI_PROVISION_URL` or `HAPPYTOKEN_NEWAPI_PROVISION_SECRET` is missing, OIDC login still succeeds and the user session reports `newapi_binding_status=pending`.
+Direct SQL provisioning is also supported:
+
+```bash
+HAPPYTOKEN_NEWAPI_SQL_DSN=postgresql://newapi_user:newapi_pass@newapi-postgres:5432/newapi
+```
+
+If neither a complete provisioning endpoint configuration nor `HAPPYTOKEN_NEWAPI_SQL_DSN` is available, OIDC login still succeeds and the user session reports `newapi_binding_status=pending`.
+
+`HAPPYIMAGE_NEWAPI_*` environment variable names are accepted as legacy fallbacks, but new deployments should use `HAPPYTOKEN_NEWAPI_*`.
+
+Binding behavior:
+
+- OIDC callback creates or reuses the local Happy Token user, then tries to create or reuse the NewAPI user/token.
+- `/api/auth/session` retries binding when the current user has OIDC identity but the stored HappyToken provider is still pending or failed.
+- `/api/auth/newapi-management` is the authenticated product endpoint used by `/settings/newapi`; it returns binding status, NewAPI user ID, token list, default API Key and the external management URL.
+- When binding status is `configured`, stale frontend messages such as `NewAPI SQL provisioning request failed` should be ignored and cleared.
+
+If the current status is truly `failed`, login still works, but the default HappyToken provider may not have a usable API Key. In that state image generation through HappyToken can fail until SQL/provisioning is fixed or the user selects another provider. SQL failures are logged as `newapi_sql_provisioning_failed` with the error type/message and a redacted DSN so operators can distinguish database connectivity, schema, and permission problems.
+
+`/settings/newapi` deliberately does not rely on NewAPI iframe auto-login. Provisioning creates database users and tokens, not a browser `session` cookie for `gateway.happy-token.cn`; the gateway admin UI can therefore show “not logged in” even when the HappyImage binding is healthy.

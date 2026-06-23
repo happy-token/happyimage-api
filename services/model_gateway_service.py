@@ -104,7 +104,16 @@ def _request_json(path: str, payload: dict[str, Any], gateway_payload: dict[str,
                 json=payload,
                 timeout=300,
             )
-            data = response.json() if response.text else {}
+            try:
+                data = response.json() if response.text else {}
+            except ValueError as exc:
+                preview = _clean(response.text)[:200]
+                raise RuntimeError(
+                    humanize_gateway_error(
+                        f"model gateway returned non-JSON response (HTTP {response.status_code})"
+                        + (f": {preview}" if preview else "")
+                    )
+                ) from exc
             break
         except Exception as exc:
             last_error = exc
@@ -180,7 +189,16 @@ def edit_image(payload: dict[str, Any]) -> dict[str, Any]:
                 ],
                 timeout=300,
             )
-            result = response.json() if response.text else {}
+            try:
+                result = response.json() if response.text else {}
+            except ValueError as exc:
+                preview = _clean(response.text)[:200]
+                raise RuntimeError(
+                    humanize_gateway_error(
+                        f"model gateway returned non-JSON response (HTTP {response.status_code})"
+                        + (f": {preview}" if preview else "")
+                    )
+                ) from exc
             break
         except Exception as exc:
             last_error = exc

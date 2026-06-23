@@ -381,7 +381,7 @@ def test_oidc_callback_allows_login_when_newapi_provider_apply_fails():
     assert "sk-user-token" not in str(payload)
 
 
-def test_get_session_preserves_newapi_binding_fields_from_session_identity():
+def test_get_session_retries_pending_newapi_binding_from_session_identity():
     app = FastAPI()
     app.include_router(auth_oidc_api.create_router())
 
@@ -413,22 +413,46 @@ def test_get_session_preserves_newapi_binding_fields_from_session_identity():
             "get_key",
             return_value=user_item,
         ),
+        mock.patch.object(
+            auth_oidc_api.newapi_binding_service,
+            "ensure_default_token",
+            return_value={
+                "ok": True,
+                "status": "configured",
+                "token": "sk-recovered",
+                "base_url": "https://gateway.happy-token.cn/v1",
+                "management_url": "https://gateway.happy-token.cn",
+            },
+        ) as ensure_token,
+        mock.patch.object(
+            auth_oidc_api.auth_service,
+            "apply_newapi_default_provider",
+            return_value={
+                **user_item,
+                "model_provider": "newapi",
+                "model_base_url": "https://gateway.happy-token.cn/v1",
+                "model_api_key_configured": True,
+            },
+        ) as apply_provider,
     ):
         response = TestClient(app).get("/api/auth/session")
 
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["newapi_binding_status"] == "pending"
-    assert (
-        payload["newapi_binding_message"]
-        == "NewAPI provisioning endpoint is not configured"
+    ensure_token.assert_called_once_with(
+        provider="casdoor",
+        subject="subject-session",
+        email="creator@example.com",
+        name="Creator",
     )
+    apply_provider.assert_called_once_with(
+        "user-oidc-session",
+        base_url="https://gateway.happy-token.cn/v1",
+        api_key="sk-recovered",
+    )
+    assert payload["newapi_binding_status"] == "configured"
     assert payload["newapi_management_url"] == "https://gateway.happy-token.cn"
-    assert payload["user"]["newapi_binding_status"] == "pending"
-    assert (
-        payload["user"]["newapi_binding_message"]
-        == "NewAPI provisioning endpoint is not configured"
-    )
+    assert payload["user"]["newapi_binding_status"] == "configured"
     assert payload["user"]["newapi_management_url"] == "https://gateway.happy-token.cn"
 
 

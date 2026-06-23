@@ -14,7 +14,7 @@
 | 前端图片工作台 | ✅  | 已支持图片生成、图片编辑、模型选择、历史记录与查看大图。 |
 | 前端图片懒加载与滚动优化 | ✅  | LazyImage 懒加载、会话切换滚动位置保存与恢复、bfcache 页面恢复同步。 |
 | 前端图片输入 / 参考图交互 | ✅  | 已支持参考图上传、预览、移除和编辑模式工作流。 |
-| 用户自定义模型供应商 | ✅  | 普通用户可在 Web “我的 -> 供应商”中配置 NewAPI/OpenAI-compatible Base URL 和 API Key。 |
+| 用户模型供应商 | ✅  | HappyToken 默认供应商自动绑定并默认选中；普通用户可在 Web “我的 -> 供应商”中添加预设或自定义 OpenAI-compatible 供应商。 |
 | Cherry Studio 接入 | ✅  | 已支持作为绘图接口接入 Cherry Studio。 |
 | New API 接入 | ✅  | 已支持接入 New API。 |
 | 本地账号池 / CPA / Sub2API 管理 | ✅ | 已移除，模型渠道与账号池统一交给 NewAPI/OpenAI-compatible 供应商。 |

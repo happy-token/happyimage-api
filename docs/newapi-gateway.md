@@ -101,17 +101,34 @@ Do not set `NEXT_PUBLIC_API_BASE_URL` in same-origin proxy mode. If the page is 
 
 ## Happy Token API Provider Configuration
 
-Happy Token API no longer uses `.env` model-gateway variables as a fallback for image generation. Each user must configure and select a provider in Happy Token Web:
+Happy Token API no longer uses `.env` model-gateway variables as a fallback for image generation. Normal users get a default HappyToken provider after Casdoor OIDC login. That provider is backed by a NewAPI user token created during binding, is selected by default, and cannot be deleted from the Web supplier list.
 
-| Field | Example |
+Users can add extra providers from the Web supplier picker:
+
+| Provider | Configuration in Web |
 |:--|:--|
-| Provider type | `newapi` |
-| Base URL | `https://<newapi-host>/v1` |
-| API Key | NewAPI token |
+| HappyToken | Auto-bound default provider; open `/settings/newapi` to view binding status and default API Key. |
+| OpenAI | API Key only; Base URL and model presets are provided by the app. |
+| Gemini / Nano Banana | API Key only; UI labels include `gemini-3.1-flash-image（Nano Banana 2）`, `gemini-3-pro-image（Nano Banana Pro）`, `gemini-2.5-flash-image（Nano Banana）`. |
+| 火山方舟 / BytePlus ModelArk / 阿里云百炼 | API Key only; Base URL and presets are provided by the app. |
+| Custom provider | Name, Base URL, model list and API Key. |
+
+The protocol field is currently stored internally as OpenAI-compatible and is not shown in the Web form. The shared image-generation path still sends OpenAI Images API style requests, so providers that do not expose compatible image endpoints need a provider-specific adapter before they can work end to end.
 
 If the current user has no selected provider with both Base URL and API Key, `/api/image-tasks/*` and `/v1/images/*` fail clearly instead of falling back to a server `.env` provider or the old local reverse-engineered account pool.
 
 Successful gateway image outputs are materialized into Happy Token image storage. When NewAPI returns a remote `data[].url`, Happy Token API downloads it, saves it through `image_storage_service`, and returns a private `/images/...` URL. This keeps generated images restorable even if the upstream temporary image host is blocked or expires.
+
+## HappyToken Management Page
+
+`/settings/newapi` is the product management entry for the default HappyToken provider. It calls Happy Token API `/api/auth/newapi-management` with the current HappyImage session and displays the binding status, NewAPI user ID, default API Key and token list.
+
+This page should not depend on an embedded NewAPI admin session. SQL/provisioning creates NewAPI database records and tokens, but it does not write a `gateway.happy-token.cn` browser `session` cookie. Because that cookie belongs to another origin and can be affected by frame and SameSite policies, direct NewAPI admin pages can show “not logged in” while HappyImage binding and model calls are already configured.
+
+If users see `NewAPI SQL provisioning request failed`, check the returned binding status first:
+
+- `configured`: the default HappyToken provider is ready; the message is stale UI state and should be cleared by the Web session refresh.
+- `pending` or `failed`: login can still succeed, but the default HappyToken API Key may be missing or unusable until NewAPI SQL/provisioning is fixed.
 
 ## Verification
 

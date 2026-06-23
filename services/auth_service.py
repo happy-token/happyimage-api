@@ -62,8 +62,18 @@ class AuthService:
                 continue
             provider_id = self._clean(raw_provider.get("id")) or uuid.uuid4().hex[:12]
             provider_type = self._clean(raw_provider.get("type") or raw_provider.get("model_provider"))[:32] or "newapi"
+            protocol = self._clean(raw_provider.get("protocol"))[:32] or "openai"
             base_url = self._clean(raw_provider.get("base_url") or raw_provider.get("model_base_url")).rstrip("/")[:512]
             api_key = self._clean(raw_provider.get("api_key") or raw_provider.get("model_api_key"))
+            raw_models = raw_provider.get("models")
+            models = []
+            if isinstance(raw_models, list):
+                seen_models: set[str] = set()
+                for raw_model in raw_models:
+                    model = self._clean(raw_model)[:100]
+                    if model and model not in seen_models:
+                        models.append(model)
+                        seen_models.add(model)
             if not api_key and bool(raw_provider.get("api_key_configured")):
                 api_key = existing_keys.get(provider_id, "")
             if not base_url:
@@ -72,7 +82,9 @@ class AuthService:
                 {
                     "id": provider_id[:64],
                     "type": provider_type,
+                    "protocol": protocol,
                     "base_url": base_url,
+                    "models": models,
                     "api_key": api_key,
                     "selected": bool(raw_provider.get("selected")),
                 }
@@ -83,7 +95,9 @@ class AuthService:
                 {
                     "id": "default",
                     "type": (fallback_provider[:32] or "newapi"),
+                    "protocol": "openai",
                     "base_url": fallback_base_url[:512],
+                    "models": [],
                     "api_key": fallback_api_key,
                     "selected": True,
                 }
@@ -116,7 +130,9 @@ class AuthService:
                 {
                     "id": provider.get("id") or "",
                     "type": provider.get("type") or "newapi",
+                    "protocol": provider.get("protocol") or "openai",
                     "base_url": provider.get("base_url") or "",
+                    "models": provider.get("models") if isinstance(provider.get("models"), list) else [],
                     "api_key_configured": bool(provider.get("api_key")),
                     "selected": bool(provider.get("selected")),
                 }

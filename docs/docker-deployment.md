@@ -102,7 +102,24 @@ docker compose up -d happytoken-api
 
 ## 配置 NewAPI 模型网关
 
-如果号池管理、模型调试和上游账号设置已经迁移到 NewAPI，Happy Token API 可以只负责登录、图库、历史会话、私有图片和任务状态。模型供应商不再通过后端 `.env` 统一配置；每个用户在 Web 的“我的 -> 供应商”里保存并选择自己的 Base URL 和 API Key，后端按当前用户选中的供应商请求 NewAPI。
+如果号池管理、模型调试和上游账号设置已经迁移到 NewAPI，Happy Token API 可以只负责登录、图库、历史会话、私有图片和任务状态。模型供应商不再通过后端 `.env` 统一配置；普通用户登录后会自动获得默认 HappyToken 供应商，也可以在 Web 的“我的 -> 供应商”里添加其他预设或自定义供应商。后端按当前用户选中的供应商请求模型网关。
+
+NewAPI/HappyToken 自动绑定常用配置：
+
+```bash
+HAPPYTOKEN_NEWAPI_BASE_URL=https://gateway.happy-token.cn
+HAPPYTOKEN_NEWAPI_MANAGEMENT_URL=https://gateway.happy-token.cn
+HAPPYTOKEN_NEWAPI_TOKEN_NAME="HappyImage Default"
+
+# 二选一：优先使用受控 provisioning endpoint
+HAPPYTOKEN_NEWAPI_PROVISION_URL=http://newapi:3000/api/internal/happyimage/bind-token
+HAPPYTOKEN_NEWAPI_PROVISION_SECRET=replace-with-internal-secret
+
+# 或使用 NewAPI 数据库直连
+HAPPYTOKEN_NEWAPI_SQL_DSN=postgresql://newapi_user:newapi_pass@newapi-postgres:5432/newapi
+```
+
+OIDC 登录会尝试创建或复用 NewAPI 用户/token，并把它写成用户默认 HappyToken 供应商。`/api/auth/session` 会在用户已有 OIDC 身份但绑定仍是 pending/failed 时重试。`/settings/newapi` 是 HappyImage 原生管理页，读取 `/api/auth/newapi-management` 展示绑定状态和默认 API Key；它不依赖 NewAPI iframe 自动登录，因为 SQL/provisioning 不会给浏览器写入 `gateway.happy-token.cn` 的 session cookie。
 
 前端 `happytoken-web` 推荐使用同源代理：
 

@@ -26,7 +26,7 @@ services:
     container_name: happytoken-api-test
     restart: unless-stopped
     ports:
-      - "8000:80"
+      - "${HAPPYTOKEN_TEST_API_PORT:-8000}:80"
     volumes:
       - ./data:/app/data
       - ./config.json:/app/config.json:rw
@@ -53,14 +53,16 @@ services:
     container_name: happytoken-web-test
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "${HAPPYTOKEN_TEST_WEB_PORT:-3000}:3000"
     environment:
-      NEXT_PUBLIC_API_BASE_URL: "http://localhost:8000"
+      NEXT_PUBLIC_API_BASE_URL: ""
+      BACKEND_URL: "http://happytoken-api:80"
+      MODEL_BACKEND_URL: "http://happytoken-api:80"
     depends_on:
       happytoken-api:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/"]
       interval: 30s
       timeout: 5s
       retries: 3

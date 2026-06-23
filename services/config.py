@@ -478,35 +478,47 @@ class ConfigStore:
         source = self.data.get("newapi_binding") if isinstance(self.data.get("newapi_binding"), dict) else {}
         base_url = (
             _getenv("HAPPYTOKEN_NEWAPI_BASE_URL")
+            or _getenv("HAPPYIMAGE_NEWAPI_BASE_URL")
             or str(source.get("base_url") or "")
             or "https://gateway.happy-token.cn"
         ).strip().rstrip("/")
         management_url = (
             _getenv("HAPPYTOKEN_NEWAPI_MANAGEMENT_URL")
+            or _getenv("HAPPYIMAGE_NEWAPI_MANAGEMENT_URL")
             or str(source.get("management_url") or "")
             or base_url
         ).strip().rstrip("/")
         provision_url = (
             _getenv("HAPPYTOKEN_NEWAPI_PROVISION_URL")
+            or _getenv("HAPPYIMAGE_NEWAPI_PROVISION_URL")
             or str(source.get("provision_url") or "")
         ).strip()
         provision_secret = (
             _getenv("HAPPYTOKEN_NEWAPI_PROVISION_SECRET")
+            or _getenv("HAPPYIMAGE_NEWAPI_PROVISION_SECRET")
             or str(source.get("provision_secret") or "")
         ).strip()
         token_name = (
             _getenv("HAPPYTOKEN_NEWAPI_TOKEN_NAME")
+            or _getenv("HAPPYIMAGE_NEWAPI_TOKEN_NAME")
             or str(source.get("token_name") or "")
             or "HappyImage Default"
         ).strip()[:80] or "HappyImage Default"
+        sql_dsn = (
+            _getenv("HAPPYTOKEN_NEWAPI_SQL_DSN")
+            or _getenv("HAPPYIMAGE_NEWAPI_SQL_DSN")
+            or str(source.get("sql_dsn") or "")
+        ).strip()
         return {
             "base_url": base_url,
             "management_url": management_url,
             "provision_url": provision_url,
             "provision_secret": provision_secret,
             "provision_secret_configured": bool(provision_secret),
+            "sql_dsn": sql_dsn,
+            "sql_dsn_configured": bool(sql_dsn),
             "token_name": token_name,
-            "enabled": bool(provision_url and provision_secret),
+            "enabled": bool((provision_url and provision_secret) or sql_dsn),
         }
 
     def get_storage_backend(self) -> StorageBackend:
