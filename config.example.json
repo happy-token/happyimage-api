@@ -15,6 +15,7 @@
   "cors_origins": [],
   "session_secret": "replace_with_a_different_strong_session_secret",
   "session_cookie_name": "happytoken_session",
+  "session_cookie_domain": "",
   "session_max_age_seconds": 86400,
   "sensitive_words": [],
   "global_system_prompt": "",

@@ -392,6 +392,17 @@ class ConfigStore:
             return 86400
 
     @property
+    def session_cookie_domain(self) -> str:
+        """Session cookie domain (e.g., 'happytoken.workers.dev' or 'happy-token.cn').
+        If empty, cookie domain is not explicitly set (uses browser implicit rules).
+        """
+        return str(
+            _getenv("HAPPYTOKEN_SESSION_COOKIE_DOMAIN")
+            or self.data.get("session_cookie_domain")
+            or ""
+        ).strip()
+
+    @property
     def app_version(self) -> str:
         try:
             value = VERSION_FILE.read_text(encoding="utf-8").strip()
@@ -416,6 +427,7 @@ class ConfigStore:
         data["cors_origins"] = self.cors_origins
         data["session_cookie_name"] = self.session_cookie_name
         data["session_max_age_seconds"] = self.session_max_age_seconds
+        data["session_cookie_domain"] = self.session_cookie_domain
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
         data["image_storage"] = self.get_image_storage_settings()

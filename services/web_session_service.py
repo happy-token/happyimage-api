@@ -169,6 +169,9 @@ class WebSessionService:
             "HttpOnly",
             "Path=/",
         ]
+        domain = config.session_cookie_domain
+        if domain:
+            parts.append(f"Domain={domain}")
         if self._cookie_uses_secure():
             parts.append("Secure")
         parts.append(f"SameSite={self._cookie_same_site()}")
@@ -184,6 +187,9 @@ class WebSessionService:
             "Max-Age=0",
             "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
         ]
+        domain = config.session_cookie_domain
+        if domain:
+            parts.append(f"Domain={domain}")
         if self._cookie_uses_secure():
             parts.append("Secure")
         parts.append(f"SameSite={self._cookie_same_site()}")
