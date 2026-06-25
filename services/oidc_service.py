@@ -1,8 +1,8 @@
-"""Generic OpenID Connect provider service for HappyImage user login.
+"""Generic OpenID Connect provider service for Happy Token user login.
 
 Handles OIDC discovery, PKCE authorize URL construction, token exchange,
 id_token claim validation, and userinfo retrieval. This service is for
-HappyImage web user login — it is separate from the OpenAI account OAuth
+Happy Token web user login — it is separate from the OpenAI account OAuth
 import flow.
 
 Note: Full JWT signature verification requires a crypto library (e.g.
@@ -141,7 +141,7 @@ class OIDCService:
     # Authorize URL
     # ------------------------------------------------------------------
 
-    def build_authorize_url(self, next_path: str = "") -> dict[str, str]:
+    def build_authorize_url(self, next_path: str = "", api_base_url: str = "") -> dict[str, str]:
         """Create a PKCE login transaction and return the authorize URL.
 
         The frontend calls this to get a URL the user's browser should
@@ -157,7 +157,7 @@ class OIDCService:
 
         scopes = str(settings.get("scopes") or "openid profile email").strip()
         client_id = str(settings.get("client_id") or "").strip()
-        callback_url = self._make_callback_url()
+        callback_url = self._make_callback_url(api_base_url)
 
         params = {
             "response_type": "code",
@@ -183,6 +183,7 @@ class OIDCService:
                 "state": state,
                 "nonce": nonce,
                 "next_path": safe_next,
+                "callback_url": callback_url,
                 "created_at": time.time(),
             }
 
@@ -193,8 +194,8 @@ class OIDCService:
         }
 
     @staticmethod
-    def _make_callback_url() -> str:
-        api_base = config.api_base_url
+    def _make_callback_url(api_base_url: str = "") -> str:
+        api_base = str(api_base_url or config.api_base_url or "").strip().rstrip("/")
         if api_base:
             return f"{api_base}/api/auth/oidc/callback"
         return "/api/auth/oidc/callback"
@@ -224,7 +225,7 @@ class OIDCService:
 
         settings = self._oidc_settings()
         token_endpoint = self._get_provider_endpoint("token_endpoint")
-        callback_url = self._make_callback_url()
+        callback_url = str(transaction.get("callback_url") or "").strip() or self._make_callback_url()
 
         token_response = self._exchange_code(
             token_endpoint=token_endpoint,

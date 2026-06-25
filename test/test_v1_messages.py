@@ -7,7 +7,7 @@ import unittest
 import pytest
 import requests
 
-AUTH_KEY = "happyimage"
+AUTH_KEY = "happytoken"
 BASE_URL = "http://localhost:8000"
 MODEL = "auto"
 

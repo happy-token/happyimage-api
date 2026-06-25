@@ -75,6 +75,12 @@ def _payload_from_fields(fields: dict[str, Any]) -> dict[str, Any]:
     }
     if "client_task_id" in fields:
         payload["client_task_id"] = _clean(fields.get("client_task_id"))
+    if "client_conversation_id" in fields:
+        payload["client_conversation_id"] = _clean(fields.get("client_conversation_id"))
+    if "client_turn_id" in fields:
+        payload["client_turn_id"] = _clean(fields.get("client_turn_id"))
+    if "client_image_id" in fields:
+        payload["client_image_id"] = _clean(fields.get("client_image_id"))
     return payload
 
 
@@ -171,7 +177,19 @@ async def parse_image_edit_request(request: Request) -> tuple[dict[str, Any], li
 
     form = await request.form()
     fields: dict[str, Any] = {}
-    for key in ("client_task_id", "prompt", "model", "n", "size", "quality", "response_format", "stream"):
+    for key in (
+        "client_task_id",
+        "prompt",
+        "model",
+        "n",
+        "size",
+        "quality",
+        "response_format",
+        "stream",
+        "client_conversation_id",
+        "client_turn_id",
+        "client_image_id",
+    ):
         value = form.get(key)
         if isinstance(value, str):
             fields[key] = value
@@ -251,7 +269,7 @@ def _download_image_url(url: str) -> ImageInput:
     try:
         response = requests.get(
             source,
-            headers={"Accept": "image/*,*/*;q=0.8", "User-Agent": "happyimage image fetcher"},
+            headers={"Accept": "image/*,*/*;q=0.8", "User-Agent": "happytoken image fetcher"},
             timeout=60,
             allow_redirects=True,
             **proxy_settings.build_session_kwargs(),

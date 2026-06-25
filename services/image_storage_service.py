@@ -152,9 +152,9 @@ class WebDAVClient:
             return {"ok": False, "status": 0, "error": "WebDAV URL is required"}
         if urlparse(self.url).scheme not in {"http", "https"}:
             return {"ok": False, "status": 0, "error": "invalid WebDAV URL"}
-        test_rel = ".happyimage_webdav_test.txt"
+        test_rel = ".happytoken_webdav_test.txt"
         try:
-            self.put(test_rel, b"happyimage webdav test\n", content_type="text/plain")
+            self.put(test_rel, b"happytoken webdav test\n", content_type="text/plain")
             self.delete(test_rel)
             return {"ok": True, "status": 200, "error": None}
         except ImageStorageError as exc:

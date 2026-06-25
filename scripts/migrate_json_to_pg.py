@@ -1,7 +1,7 @@
 """把 JSON 存储的数据迁移到 PostgreSQL。
 
 用法:
-  DATABASE_URL=postgresql://happyimage:happyimage-local-dev@localhost:5432/happyimage \
+  DATABASE_URL=postgresql://happytoken:happytoken-local-dev@localhost:5432/happytoken \
   python scripts/migrate_json_to_pg.py /path/to/original/data
 
 表结构与 database_storage.py 一致：

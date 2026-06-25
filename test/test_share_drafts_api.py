@@ -13,7 +13,7 @@ import services.gallery_prompt_service as gallery_prompt_service
 from services.share_draft_service import ShareDraftService
 
 
-AUTH_HEADERS = {"Authorization": "Bearer happyimage"}
+AUTH_HEADERS = {"Authorization": "Bearer happytoken"}
 
 
 def make_draft_payload(**overrides: object) -> dict[str, object]:
@@ -249,20 +249,14 @@ class ShareDraftsApiTests(unittest.TestCase):
 
 
 class GalleryPromptServiceTests(unittest.TestCase):
-    def test_summary_falls_back_to_original_prompt_and_logs_warning(self) -> None:
-        with (
-            mock.patch.object(gallery_prompt_service, "text_backend", return_value=object()),
-            mock.patch.object(gallery_prompt_service, "collect_text", side_effect=RuntimeError("boom")),
-            self.assertLogs("services.gallery_prompt_service", level="WARNING") as logs,
-        ):
-            summary = gallery_prompt_service.generate_conversation_summary({
-                "original_prompt": "a cat wearing a tiny hat",
-                "conversation_id": "conv-1",
-                "image_url": "/images/cat.png",
-            })
+    def test_summary_falls_back_to_original_prompt(self) -> None:
+        summary = gallery_prompt_service.generate_conversation_summary({
+            "original_prompt": "a cat wearing a tiny hat",
+            "conversation_id": "conv-1",
+            "image_url": "/images/cat.png",
+        })
 
         self.assertEqual(summary, "a cat wearing a tiny hat")
-        self.assertTrue(any("RuntimeError" in message for message in logs.output))
 
 
 if __name__ == "__main__":

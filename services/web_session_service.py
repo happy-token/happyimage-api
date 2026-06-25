@@ -1,4 +1,4 @@
-"""Signed web session service for HappyImage browser sessions.
+"""Signed web session service for Happy Token browser sessions.
 
 Creates and validates stateless signed session tokens stored in HttpOnly
 cookies. Sessions contain the user identity needed by auth checks without
@@ -13,6 +13,7 @@ import json
 import time
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 from typing import Any
+from urllib.parse import urlparse
 
 from services.config import config
 
@@ -40,7 +41,7 @@ class WebSessionService:
     def _secret(self) -> str:
         secret = config.session_secret
         if not secret:
-            raise WebSessionError("HAPPYIMAGE_SESSION_SECRET 未配置")
+            raise WebSessionError("HAPPYTOKEN_SESSION_SECRET 未配置")
         return secret
 
     @property
@@ -62,7 +63,6 @@ class WebSessionService:
             "sub": str(identity.get("id") or ""),
             "name": str(identity.get("name") or ""),
             "role": str(identity.get("role") or "user"),
-            "image_quota": identity.get("image_quota"),
             "iat": now,
             "exp": now + self.max_age,
         }
@@ -140,9 +140,6 @@ class WebSessionService:
             "role": role,
         }
         if role == "user":
-            quota = session_payload.get("image_quota")
-            if quota is not None:
-                identity["image_quota"] = quota
             for key in ("auth_provider", "auth_subject", "email"):
                 value = str(session_payload.get(key) or "").strip()
                 if value:
@@ -153,6 +150,18 @@ class WebSessionService:
     # Cookie construction
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cookie_uses_secure() -> bool:
+        return config.api_base_url.startswith("https://")
+
+    @classmethod
+    def _cookie_same_site(cls) -> str:
+        frontend = config.frontend_base_url
+        frontend_scheme = urlparse(frontend).scheme if frontend else ""
+        if not cls._cookie_uses_secure() or frontend_scheme != "https":
+            return "Lax"
+        return "None"
+
     def make_set_cookie_header(self, token: str) -> str:
         """Build a Set-Cookie header value for the session cookie."""
         parts = [
@@ -160,13 +169,12 @@ class WebSessionService:
             "HttpOnly",
             "Path=/",
         ]
-        if config.api_base_url.startswith("https://"):
+        domain = config.session_cookie_domain
+        if domain:
+            parts.append(f"Domain={domain}")
+        if self._cookie_uses_secure():
             parts.append("Secure")
-        frontend = config.frontend_base_url
-        if frontend and not frontend.startswith("http://127.") and not frontend.startswith("http://localhost"):
-            parts.append("SameSite=None")
-        else:
-            parts.append("SameSite=Lax")
+        parts.append(f"SameSite={self._cookie_same_site()}")
         parts.append(f"Max-Age={self.max_age}")
         return "; ".join(parts)
 
@@ -177,12 +185,14 @@ class WebSessionService:
             "HttpOnly",
             "Path=/",
             "Max-Age=0",
+            "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
         ]
-        frontend = config.frontend_base_url
-        if frontend and not frontend.startswith("http://127.") and not frontend.startswith("http://localhost"):
-            parts.append("SameSite=None")
-        else:
-            parts.append("SameSite=Lax")
+        domain = config.session_cookie_domain
+        if domain:
+            parts.append(f"Domain={domain}")
+        if self._cookie_uses_secure():
+            parts.append("Secure")
+        parts.append(f"SameSite={self._cookie_same_site()}")
         return "; ".join(parts)
 
     # ------------------------------------------------------------------

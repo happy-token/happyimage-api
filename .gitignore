@@ -10,8 +10,6 @@ web_dist
 .venv
 .idea
 data/*
-!data/image-gallery-seed/
-!data/image-gallery-seed/**
 config.json
 edit
 

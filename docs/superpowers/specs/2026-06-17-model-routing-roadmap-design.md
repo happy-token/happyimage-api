@@ -1,10 +1,10 @@
-# HappyImage Model Routing Roadmap Design
+# Happy Token Model Routing Roadmap Design
 
 Date: 2026-06-17
 
 ## Summary
 
-HappyImage will start its larger architecture cleanup with a backend-core-first roadmap. Phase 1 introduces a model routing service that centralizes model definitions, aliases, capabilities, provider routing, account selection hints, and upstream model slug mapping.
+Happy Token will start its larger architecture cleanup with a backend-core-first roadmap. Phase 1 introduces a model routing service that centralizes model definitions, aliases, capabilities, provider routing, account selection hints, and upstream model slug mapping.
 
 This phase does not rewrite image generation, image editing, chat execution, task queues, quota accounting, logging, or streaming. Existing execution paths remain in place and gradually consume structured model routing decisions from the new service.
 
@@ -28,7 +28,7 @@ This phase does not rewrite image generation, image editing, chat execution, tas
 
 The current codebase already exposes OpenAI-compatible routes through FastAPI and serves a Next.js frontend from the same backend process. Model behavior is distributed across several locations:
 
-- `services/protocol/openai_v1_models.py` builds `/v1/models`, mixing upstream anonymous model data with dynamic HappyImage image models from the account pool.
+- `services/protocol/openai_v1_models.py` builds `/v1/models`, mixing upstream anonymous model data with dynamic Happy Token image models from the account pool.
 - `utils/helper.py` defines image model constants and helpers such as `split_image_model`, `is_supported_image_model`, and `is_codex_image_model`.
 - `services/protocol/conversation.py` validates supported image models, chooses account filters, decides whether to use Web image generation or Codex image generation, and reports unsupported models.
 - `services/openai_backend_api.py` maps public image model names to upstream ChatGPT model slugs.
@@ -53,7 +53,7 @@ Add `services/model_service.py` with three main concepts.
 
 ### ModelDefinition
 
-Describes a model known to HappyImage.
+Describes a model known to Happy Token.
 
 Fields:
 
@@ -105,7 +105,7 @@ Those wrappers should delegate to `ModelService` after migration.
 
 ### `/v1/models`
 
-`services.protocol.openai_v1_models.list_models()` should call `ModelService.list_models()` for HappyImage-owned model definitions. It may continue to fetch upstream anonymous model data as supplemental data, but HappyImage image models should come from the local model catalog.
+`services.protocol.openai_v1_models.list_models()` should call `ModelService.list_models()` for Happy Token-owned model definitions. It may continue to fetch upstream anonymous model data as supplemental data, but Happy Token image models should come from the local model catalog.
 
 The route must keep returning an OpenAI-compatible list response:
 
@@ -116,13 +116,13 @@ The route must keep returning an OpenAI-compatible list response:
     {
       "id": "gpt-image-2",
       "object": "model",
-      "owned_by": "happyimage"
+      "owned_by": "happytoken"
     }
   ]
 }
 ```
 
-If HappyImage-specific capability metadata is added later, it should be additive and non-breaking.
+If Happy Token-specific capability metadata is added later, it should be additive and non-breaking.
 
 ### Image Generation and Image Edit
 
@@ -221,7 +221,7 @@ Stabilize API boundaries for the OpenAI-compatible API, Admin API, and frontend-
 
 - Model-related constants and parsing logic have one primary source in `ModelService`.
 - Existing OpenAI-compatible image APIs keep their request and response behavior.
-- `/v1/models` remains OpenAI-compatible and includes HappyImage-supported image models.
+- `/v1/models` remains OpenAI-compatible and includes Happy Token-supported image models.
 - Image model validation, Codex detection, account filter selection, and upstream slug mapping can be tested without invoking upstream ChatGPT.
 - Phase 2 can start by changing account-pool consumers to accept `ModelRoute` account hints instead of hand-built model conditionals.
 

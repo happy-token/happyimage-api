@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -15,7 +16,7 @@ if str(ROOT_DIR) not in sys.path:
 
 
 def load_auth_key() -> str:
-    return json.loads((ROOT_DIR / "config.json").read_text(encoding="utf-8"))["auth-key"]
+    return str(os.getenv("HAPPYTOKEN_USER_TOKEN") or "").strip()
 
 
 def post_json(path: str, payload: dict) -> dict:

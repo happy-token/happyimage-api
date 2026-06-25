@@ -16,7 +16,7 @@ from services.image_storage_service import ImageStorageService
 
 
 def png_bytes() -> bytes:
-    path = Path(tempfile.gettempdir()) / "HappyImage-private-route-test.png"
+    path = Path(tempfile.gettempdir()) / "Happy Token-private-route-test.png"
     Image.new("RGB", (2, 2), color=(0, 128, 255)).save(path, format="PNG")
     return path.read_bytes()
 
@@ -33,7 +33,6 @@ class PrivateImageRouteTests(unittest.TestCase):
                 images_dir=root,
                 image_thumbnails_dir=Path(tmp) / "image_thumbnails",
                 session_secret="session-secret",
-                auth_key="auth-key",
                 data={"image_access_token_ttl_seconds": 60},
                 cleanup_old_images=lambda: 0,
             )
@@ -76,7 +75,6 @@ class PrivateImageRouteTests(unittest.TestCase):
                 images_dir=root,
                 image_thumbnails_dir=Path(tmp) / "image_thumbnails",
                 session_secret="session-secret",
-                auth_key="auth-key",
                 base_url="http://testserver",
                 data={"image_access_token_ttl_seconds": 60},
                 cleanup_old_images=lambda: 0,
@@ -127,7 +125,6 @@ class PrivateImageRouteTests(unittest.TestCase):
                 images_dir=root,
                 image_thumbnails_dir=Path(tmp) / "image_thumbnails",
                 session_secret="session-secret",
-                auth_key="auth-key",
                 base_url="http://testserver",
                 data={"image_access_token_ttl_seconds": 60},
                 cleanup_old_images=lambda: 0,

@@ -9,7 +9,6 @@ from threading import Lock
 from typing import Literal
 
 from services.config import config
-from services.log_service import LOG_TYPE_USER_QUOTA, log_service
 from services.storage.base import StorageBackend
 
 AuthRole = Literal["admin", "user"]
@@ -38,6 +37,123 @@ class AuthService:
     def _default_name(role: object) -> str:
         return "管理员密钥" if str(role or "").strip().lower() == "admin" else "普通用户"
 
+    def _normalize_model_providers(
+        self,
+        value: object,
+        *,
+        fallback_provider: str = "",
+        fallback_base_url: str = "",
+        fallback_api_key: str = "",
+        existing: object = None,
+    ) -> list[dict[str, object]]:
+        existing_keys: dict[str, str] = {}
+        if isinstance(existing, list):
+            for item in existing:
+                if not isinstance(item, dict):
+                    continue
+                provider_id = self._clean(item.get("id"))
+                if provider_id:
+                    existing_keys[provider_id] = self._clean(item.get("api_key"))
+
+        providers: list[dict[str, object]] = []
+        source = value if isinstance(value, list) else []
+        for index, raw_provider in enumerate(source):
+            if not isinstance(raw_provider, dict):
+                continue
+            provider_id = self._clean(raw_provider.get("id")) or uuid.uuid4().hex[:12]
+            provider_type = self._clean(raw_provider.get("type") or raw_provider.get("model_provider"))[:32] or "newapi"
+            protocol = self._clean(raw_provider.get("protocol"))[:32] or "openai"
+            base_url = self._clean(raw_provider.get("base_url") or raw_provider.get("model_base_url")).rstrip("/")[:512]
+            api_key = self._clean(raw_provider.get("api_key") or raw_provider.get("model_api_key"))
+            raw_models = raw_provider.get("models")
+            models = []
+            if isinstance(raw_models, list):
+                seen_models: set[str] = set()
+                for raw_model in raw_models:
+                    model = self._clean(raw_model)[:100]
+                    if model and model not in seen_models:
+                        models.append(model)
+                        seen_models.add(model)
+            if not api_key and bool(raw_provider.get("api_key_configured")):
+                api_key = existing_keys.get(provider_id, "")
+            if not base_url:
+                continue
+            providers.append(
+                {
+                    "id": provider_id[:64],
+                    "type": provider_type,
+                    "protocol": protocol,
+                    "base_url": base_url,
+                    "models": models,
+                    "api_key": api_key,
+                    "selected": bool(raw_provider.get("selected")),
+                }
+            )
+
+        if not providers and (fallback_base_url or fallback_api_key):
+            providers.append(
+                {
+                    "id": "default",
+                    "type": (fallback_provider[:32] or "newapi"),
+                    "protocol": "openai",
+                    "base_url": fallback_base_url[:512],
+                    "models": [],
+                    "api_key": fallback_api_key,
+                    "selected": True,
+                }
+            )
+
+        first_selected_index = next((index for index, item in enumerate(providers) if bool(item.get("selected"))), 0)
+        return [{**item, "selected": index == first_selected_index} for index, item in enumerate(providers)]
+
+    @staticmethod
+    def _selected_model_provider(providers: object) -> dict[str, object]:
+        if not isinstance(providers, list):
+            return {}
+        for provider in providers:
+            if isinstance(provider, dict) and bool(provider.get("selected")):
+                return provider
+        for provider in providers:
+            if isinstance(provider, dict):
+                return provider
+        return {}
+
+    @classmethod
+    def _public_model_providers(cls, providers: object) -> list[dict[str, object]]:
+        if not isinstance(providers, list):
+            return []
+        public: list[dict[str, object]] = []
+        for provider in providers:
+            if not isinstance(provider, dict):
+                continue
+            public.append(
+                {
+                    "id": provider.get("id") or "",
+                    "type": provider.get("type") or "newapi",
+                    "protocol": provider.get("protocol") or "openai",
+                    "base_url": provider.get("base_url") or "",
+                    "models": provider.get("models") if isinstance(provider.get("models"), list) else [],
+                    "api_key_configured": bool(provider.get("api_key")),
+                    "selected": bool(provider.get("selected")),
+                }
+            )
+        return public
+
+    def _sync_legacy_model_provider_fields(self, item: dict[str, object]) -> dict[str, object]:
+        providers = self._normalize_model_providers(
+            item.get("model_providers"),
+            fallback_provider=self._clean(item.get("model_provider")),
+            fallback_base_url=self._clean(item.get("model_base_url")).rstrip("/"),
+            fallback_api_key=self._clean(item.get("model_api_key")),
+            existing=item.get("model_providers"),
+        )
+        selected_provider = self._selected_model_provider(providers)
+        item["model_providers"] = providers
+        item["model_provider"] = selected_provider.get("type") or ""
+        item["model_base_url"] = selected_provider.get("base_url") or ""
+        item["model_api_key"] = selected_provider.get("api_key") or ""
+        return item
+
     def _normalize_item(self, raw: object) -> dict[str, object] | None:
         if not isinstance(raw, dict):
             return None
@@ -55,24 +171,33 @@ class AuthService:
         name = self._clean(raw.get("name")) or self._default_name(role)
         created_at = self._clean(raw.get("created_at")) or _now_iso()
         last_used_at = self._clean(raw.get("last_used_at")) or None
-        image_quota = raw.get("image_quota")
-        if image_quota is not None:
-            try:
-                image_quota = max(0, int(image_quota))
-            except (TypeError, ValueError):
-                image_quota = 0
         watermark_label = self._clean(raw.get("watermark_label"))
         watermark_unlocked = bool(raw.get("watermark_unlocked", False))
+        model_provider = self._clean(raw.get("model_provider"))
+        model_base_url = self._clean(raw.get("model_base_url")).rstrip("/")
+        model_api_key = self._clean(raw.get("model_api_key"))
         email = self._clean(raw.get("email")) or None
+        preferences = raw.get("preferences") if isinstance(raw.get("preferences"), dict) else {}
+        model_providers = self._normalize_model_providers(
+            raw.get("model_providers"),
+            fallback_provider=model_provider,
+            fallback_base_url=model_base_url,
+            fallback_api_key=model_api_key,
+        )
+        selected_provider = self._selected_model_provider(model_providers)
         item: dict[str, object] = {
             "id": item_id,
             "name": name,
             "role": role,
             "key_hash": key_hash,
             "enabled": bool(raw.get("enabled", True)),
-            "image_quota": image_quota,
             "watermark_label": watermark_label,
             "watermark_unlocked": watermark_unlocked,
+            "model_provider": selected_provider.get("type") or model_provider,
+            "model_base_url": selected_provider.get("base_url") or model_base_url,
+            "model_api_key": selected_provider.get("api_key") or model_api_key,
+            "model_providers": model_providers,
+            "preferences": dict(preferences),
             "created_at": created_at,
             "last_used_at": last_used_at,
         }
@@ -101,14 +226,19 @@ class AuthService:
 
     @staticmethod
     def _public_item(item: dict[str, object]) -> dict[str, object]:
+        providers = AuthService._public_model_providers(item.get("model_providers"))
         public: dict[str, object] = {
             "id": item.get("id"),
             "name": item.get("name"),
             "role": item.get("role"),
             "enabled": bool(item.get("enabled", True)),
-            "image_quota": item.get("image_quota"),
             "watermark_label": item.get("watermark_label") or "",
             "watermark_unlocked": bool(item.get("watermark_unlocked", False)),
+            "model_provider": item.get("model_provider") or "",
+            "model_base_url": item.get("model_base_url") or "",
+            "model_api_key_configured": bool(item.get("model_api_key")),
+            "model_providers": providers,
+            "preferences": item.get("preferences") if isinstance(item.get("preferences"), dict) else {},
             "created_at": item.get("created_at"),
             "last_used_at": item.get("last_used_at"),
         }
@@ -143,6 +273,23 @@ class AuthService:
                 return self._public_item(item)
         return None
 
+    def get_model_gateway_config(self, key_id: str) -> dict[str, object]:
+        normalized_id = self._clean(key_id)
+        if not normalized_id:
+            return {}
+        with self._lock:
+            self._reload_locked()
+            for item in self._items:
+                if item.get("id") != normalized_id:
+                    continue
+                selected_provider = self._selected_model_provider(item.get("model_providers"))
+                return {
+                    "model_provider": selected_provider.get("type") or item.get("model_provider") or "",
+                    "model_base_url": selected_provider.get("base_url") or item.get("model_base_url") or "",
+                    "model_api_key": selected_provider.get("api_key") or item.get("model_api_key") or "",
+                }
+        return {}
+
     def _has_key_hash_locked(self, key_hash: str, *, exclude_id: str = "") -> bool:
         for item in self._items:
             item_id = self._clean(item.get("id"))
@@ -157,9 +304,6 @@ class AuthService:
         candidate = self._clean(raw_key)
         if not candidate:
             raise ValueError("请输入新的专用密钥")
-        admin_key = self._clean(config.auth_key)
-        if admin_key and hmac.compare_digest(candidate, admin_key):
-            raise ValueError("这个密钥和管理员密钥冲突了，请换一个新的密钥")
         key_hash = _hash_key(candidate)
         if self._has_key_hash_locked(key_hash, exclude_id=exclude_id):
             raise ValueError("这个专用密钥已经存在，请换一个新的密钥")
@@ -198,28 +342,17 @@ class AuthService:
             raise ValueError("这个名称已经在使用中了，换一个更容易区分的名称吧")
         return candidate
 
-    @staticmethod
-    def _normalize_image_quota(image_quota: object) -> int | None:
-        if image_quota is None:
-            return None
-        try:
-            return max(0, int(image_quota))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("图片额度必须是非负整数") from exc
-
     def create_key(
         self,
         *,
         role: AuthRole,
         name: str = "",
-        image_quota: object = None,
         watermark_label: str = "",
         watermark_unlocked: bool = False,
     ) -> tuple[dict[str, object], str]:
         with self._lock:
             self._reload_locked()
             normalized_name = self._build_name_locked(name, role=role)
-            normalized_quota = self._normalize_image_quota(image_quota)
             while True:
                 raw_key = f"sk-{secrets.token_urlsafe(24)}"
                 try:
@@ -233,7 +366,6 @@ class AuthService:
                 "role": role,
                 "key_hash": key_hash,
                 "enabled": True,
-                "image_quota": normalized_quota,
                 "watermark_label": self._clean(watermark_label),
                 "watermark_unlocked": bool(watermark_unlocked),
                 "created_at": _now_iso(),
@@ -241,20 +373,6 @@ class AuthService:
             }
             self._items.append(item)
             self._save()
-            if role == "user":
-                log_service.add(
-                    LOG_TYPE_USER_QUOTA,
-                    "创建用户",
-                    {
-                        "action": "create",
-                        "user_id": item["id"],
-                        "user_name": item["name"],
-                        "amount": normalized_quota or 0,
-                        "before_quota": 0,
-                        "after_quota": normalized_quota,
-                        "enabled": True,
-                    },
-                )
             return self._public_item(item), raw_key
 
     def create_key_with_value(
@@ -263,7 +381,6 @@ class AuthService:
         role: AuthRole,
         name: str = "",
         key: str = "",
-        image_quota: object = None,
         watermark_label: str = "",
         watermark_unlocked: bool = False,
     ) -> dict[str, object]:
@@ -271,14 +388,12 @@ class AuthService:
             self._reload_locked()
             normalized_name = self._build_name_locked(name, role=role)
             key_hash = self._build_key_hash_locked(key)
-            normalized_quota = self._normalize_image_quota(image_quota)
             item = {
                 "id": uuid.uuid4().hex[:12],
                 "name": normalized_name,
                 "role": role,
                 "key_hash": key_hash,
                 "enabled": True,
-                "image_quota": normalized_quota,
                 "watermark_label": self._clean(watermark_label),
                 "watermark_unlocked": bool(watermark_unlocked),
                 "created_at": _now_iso(),
@@ -286,20 +401,6 @@ class AuthService:
             }
             self._items.append(item)
             self._save()
-            if role == "user":
-                log_service.add(
-                    LOG_TYPE_USER_QUOTA,
-                    "创建用户",
-                    {
-                        "action": "create",
-                        "user_id": item["id"],
-                        "user_name": item["name"],
-                        "amount": normalized_quota or 0,
-                        "before_quota": 0,
-                        "after_quota": normalized_quota,
-                        "enabled": True,
-                    },
-                )
             return self._public_item(item)
 
     def update_key(
@@ -329,133 +430,72 @@ class AuthService:
                     )
                 if "enabled" in updates and updates.get("enabled") is not None:
                     next_item["enabled"] = bool(updates.get("enabled"))
-                if "image_quota" in updates:
-                    quota = updates.get("image_quota")
-                    if quota is None:
-                        next_item["image_quota"] = None
-                    else:
-                        try:
-                            next_item["image_quota"] = max(0, int(quota))
-                        except (TypeError, ValueError) as exc:
-                            raise ValueError("图片额度必须是非负整数") from exc
                 if "watermark_label" in updates and updates.get("watermark_label") is not None:
                     next_item["watermark_label"] = self._clean(updates.get("watermark_label"))[:64]
                 if "watermark_unlocked" in updates and updates.get("watermark_unlocked") is not None:
                     next_item["watermark_unlocked"] = bool(updates.get("watermark_unlocked"))
+                if "model_providers" in updates and updates.get("model_providers") is not None:
+                    next_item["model_providers"] = self._normalize_model_providers(
+                        updates.get("model_providers"),
+                        existing=next_item.get("model_providers"),
+                    )
+                if "model_provider" in updates and updates.get("model_provider") is not None:
+                    providers = self._normalize_model_providers(next_item.get("model_providers"))
+                    selected_provider = dict(self._selected_model_provider(providers))
+                    if not selected_provider:
+                        selected_provider = {
+                            "id": "default",
+                            "type": "newapi",
+                            "base_url": "",
+                            "api_key": "",
+                            "selected": True,
+                        }
+                    selected_provider["type"] = self._clean(updates.get("model_provider"))[:32] or "newapi"
+                    next_item["model_providers"] = [
+                        selected_provider if provider.get("id") == selected_provider.get("id") else {**provider, "selected": False}
+                        for provider in providers
+                    ] or [selected_provider]
+                if "model_base_url" in updates and updates.get("model_base_url") is not None:
+                    providers = self._normalize_model_providers(next_item.get("model_providers"))
+                    selected_provider = dict(self._selected_model_provider(providers))
+                    if not selected_provider:
+                        selected_provider = {
+                            "id": "default",
+                            "type": self._clean(next_item.get("model_provider")) or "newapi",
+                            "base_url": "",
+                            "api_key": "",
+                            "selected": True,
+                        }
+                    selected_provider["base_url"] = self._clean(updates.get("model_base_url")).rstrip("/")[:512]
+                    next_item["model_providers"] = [
+                        selected_provider if provider.get("id") == selected_provider.get("id") else {**provider, "selected": False}
+                        for provider in providers
+                    ] or [selected_provider]
+                if "model_api_key" in updates and updates.get("model_api_key") is not None:
+                    providers = self._normalize_model_providers(next_item.get("model_providers"))
+                    selected_provider = dict(self._selected_model_provider(providers))
+                    if not selected_provider:
+                        selected_provider = {
+                            "id": "default",
+                            "type": self._clean(next_item.get("model_provider")) or "newapi",
+                            "base_url": self._clean(next_item.get("model_base_url")).rstrip("/"),
+                            "api_key": "",
+                            "selected": True,
+                        }
+                    selected_provider["api_key"] = self._clean(updates.get("model_api_key"))
+                    next_item["model_providers"] = [
+                        selected_provider if provider.get("id") == selected_provider.get("id") else {**provider, "selected": False}
+                        for provider in providers
+                    ] or [selected_provider]
+                if "preferences" in updates and isinstance(updates.get("preferences"), dict):
+                    next_item["preferences"] = dict(updates["preferences"])
                 if "key" in updates and updates.get("key") is not None:
                     next_item["key_hash"] = self._build_key_hash_locked(str(updates.get("key") or ""), exclude_id=normalized_id)
+                next_item = self._sync_legacy_model_provider_fields(next_item)
                 self._items[index] = next_item
                 self._save()
-                old_quota_raw = item.get("image_quota")
-                new_quota_raw = next_item.get("image_quota")
-                old_quota = None if old_quota_raw is None else max(0, int(old_quota_raw))
-                new_quota = None if new_quota_raw is None else max(0, int(new_quota_raw))
-                if next_role == "user":
-                    quota_changed = old_quota != new_quota
-                    enabled_changed = bool(item.get("enabled", True)) != bool(next_item.get("enabled", True))
-                    if quota_changed or enabled_changed or ("name" in updates):
-                        delta = None
-                        if old_quota is not None and new_quota is not None:
-                            delta = new_quota - old_quota
-                        action = "adjust"
-                        if enabled_changed:
-                            action = "enable" if bool(next_item.get("enabled", True)) else "disable"
-                        elif isinstance(delta, int) and delta > 0:
-                            action = "recharge"
-                        log_service.add(
-                            LOG_TYPE_USER_QUOTA,
-                            "更新用户",
-                            {
-                                "action": action,
-                                "user_id": next_item["id"],
-                                "user_name": next_item["name"],
-                                "before_quota": old_quota,
-                                "after_quota": new_quota,
-                                "amount": delta,
-                                "enabled_before": bool(item.get("enabled", True)),
-                                "enabled_after": bool(next_item.get("enabled", True)),
-                            },
-                        )
                 return self._public_item(next_item)
         return None
-
-    def reserve_image_quota(self, identity: dict[str, object], amount: int = 1) -> bool:
-        if identity.get("role") == "admin":
-            return False
-        try:
-            normalized_amount = max(1, int(amount))
-        except (TypeError, ValueError):
-            normalized_amount = 1
-        key_id = self._clean(identity.get("id"))
-        if not key_id:
-            raise ValueError("用户身份无效")
-        with self._lock:
-            self._reload_locked()
-            for index, item in enumerate(self._items):
-                if item.get("id") != key_id:
-                    continue
-                quota = item.get("image_quota")
-                if quota is None:
-                    return False
-                remaining = max(0, int(quota))
-                if remaining < normalized_amount:
-                    raise ValueError("用户图片额度不足")
-                next_item = dict(item)
-                next_item["image_quota"] = remaining - normalized_amount
-                self._items[index] = next_item
-                self._save()
-                identity["image_quota"] = next_item["image_quota"]
-                log_service.add(
-                    LOG_TYPE_USER_QUOTA,
-                    "消耗额度",
-                    {
-                        "action": "consume",
-                        "user_id": next_item["id"],
-                        "user_name": next_item["name"],
-                        "amount": normalized_amount,
-                        "before_quota": remaining,
-                        "after_quota": next_item["image_quota"],
-                    },
-                )
-                return True
-        raise ValueError("用户身份无效")
-
-    def refund_image_quota(self, identity: dict[str, object], amount: int = 1) -> None:
-        if identity.get("role") == "admin":
-            return
-        try:
-            normalized_amount = max(1, int(amount))
-        except (TypeError, ValueError):
-            normalized_amount = 1
-        key_id = self._clean(identity.get("id"))
-        if not key_id:
-            return
-        with self._lock:
-            self._reload_locked()
-            for index, item in enumerate(self._items):
-                if item.get("id") != key_id:
-                    continue
-                quota = item.get("image_quota")
-                if quota is None:
-                    return
-                next_item = dict(item)
-                next_item["image_quota"] = max(0, int(quota)) + normalized_amount
-                self._items[index] = next_item
-                self._save()
-                identity["image_quota"] = next_item["image_quota"]
-                log_service.add(
-                    LOG_TYPE_USER_QUOTA,
-                    "返还额度",
-                    {
-                        "action": "refund",
-                        "user_id": next_item["id"],
-                        "user_name": next_item["name"],
-                        "amount": normalized_amount,
-                        "before_quota": max(0, int(quota)),
-                        "after_quota": next_item["image_quota"],
-                    },
-                )
-                return
 
     def delete_key(self, key_id: str, *, role: AuthRole | None = None) -> bool:
         normalized_id = self._clean(key_id)
@@ -463,10 +503,6 @@ class AuthService:
             return False
         with self._lock:
             self._reload_locked()
-            removed_items = [
-                item for item in self._items
-                if item.get("id") == normalized_id and (role is None or item.get("role") == role)
-            ]
             before = len(self._items)
             self._items = [
                 item
@@ -476,24 +512,6 @@ class AuthService:
             if len(self._items) == before:
                 return False
             self._save()
-            for item in removed_items:
-                if item.get("role") == "user":
-                    quota_raw = item.get("image_quota")
-                    quota = None if quota_raw is None else max(0, int(quota_raw))
-                    log_service.add(
-                        LOG_TYPE_USER_QUOTA,
-                        "删除用户",
-                        {
-                            "action": "delete",
-                            "user_id": item.get("id"),
-                            "user_name": item.get("name"),
-                            "before_quota": quota,
-                            "after_quota": None,
-                            "amount": None,
-                            "enabled_before": bool(item.get("enabled", True)),
-                            "enabled_after": False,
-                        },
-                    )
             return True
 
     # ------------------------------------------------------------------
@@ -534,7 +552,6 @@ class AuthService:
         auth_subject: str,
         email: str = "",
         name: str = "",
-        default_image_quota: int = 0,
     ) -> dict[str, object]:
         """Find existing OIDC-bound user or create a new one.
 
@@ -604,9 +621,12 @@ class AuthService:
                 "role": "user",
                 "key_hash": "",
                 "enabled": True,
-                "image_quota": default_image_quota,
                 "watermark_label": "",
                 "watermark_unlocked": False,
+                "model_provider": "",
+                "model_base_url": "",
+                "model_api_key": "",
+                "preferences": {},
                 "auth_provider": normalized_provider,
                 "auth_subject": normalized_subject,
                 "created_at": _now_iso(),
@@ -618,22 +638,48 @@ class AuthService:
             self._items.append(item)
             self._save()
 
-            log_service.add(
-                LOG_TYPE_USER_QUOTA,
-                "OIDC 自动创建用户",
-                {
-                    "action": "oidc_create",
-                    "user_id": item["id"],
-                    "user_name": item["name"],
-                    "amount": default_image_quota,
-                    "before_quota": 0,
-                    "after_quota": default_image_quota,
-                    "enabled": True,
-                    "auth_provider": normalized_provider,
-                },
-            )
-
             return self._public_item(item)
+
+    def apply_newapi_default_provider(
+        self,
+        key_id: str,
+        *,
+        base_url: str,
+        api_key: str,
+    ) -> dict[str, object] | None:
+        normalized_id = self._clean(key_id)
+        normalized_base_url = self._clean(base_url).rstrip("/")
+        normalized_api_key = self._clean(api_key)
+        if not normalized_id:
+            return None
+        if not normalized_base_url or not normalized_api_key:
+            raise ValueError("NewAPI 默认供应商配置不完整")
+        provider = {
+            "id": "newapi-default",
+            "type": "newapi",
+            "base_url": normalized_base_url[:512],
+            "api_key": normalized_api_key,
+            "selected": True,
+        }
+        with self._lock:
+            self._reload_locked()
+            for index, item in enumerate(self._items):
+                if item.get("id") != normalized_id:
+                    continue
+                providers = self._normalize_model_providers(item.get("model_providers"))
+                next_providers = [
+                    {**existing, "selected": False}
+                    for existing in providers
+                    if self._clean(existing.get("id")) != "newapi-default"
+                ]
+                next_providers.append(provider)
+                next_item = dict(item)
+                next_item["model_providers"] = next_providers
+                next_item = self._sync_legacy_model_provider_fields(next_item)
+                self._items[index] = next_item
+                self._save()
+                return self._public_item(next_item)
+        return None
 
     def authenticate(self, raw_key: str) -> dict[str, object] | None:
         candidate = self._clean(raw_key)
@@ -659,7 +705,9 @@ class AuthService:
                         self._last_used_flush_at[item_id] = now
                     except Exception:
                         pass
-                return self._public_item(next_item)
+                public = self._public_item(next_item)
+                public["model_api_key"] = self._selected_model_provider(next_item.get("model_providers")).get("api_key") or next_item.get("model_api_key") or ""
+                return public
         return None
 
 

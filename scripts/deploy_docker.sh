@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REMOTE_HOST="${HAPPYIMAGE_DEPLOY_HOST:?Set HAPPYIMAGE_DEPLOY_HOST to your deploy target}"
-REMOTE_COMPOSE_DIR="${HAPPYIMAGE_DEPLOY_COMPOSE_DIR:?Set HAPPYIMAGE_DEPLOY_COMPOSE_DIR to your remote compose directory}"
-SERVICE="${HAPPYIMAGE_DEPLOY_SERVICE:-happyimage}"
-HEALTH_URL="${HAPPYIMAGE_DEPLOY_HEALTH_URL:-http://localhost:3000/health?format=json}"
+REMOTE_HOST="${HAPPYTOKEN_DEPLOY_HOST:?Set HAPPYTOKEN_DEPLOY_HOST to your deploy target}"
+REMOTE_COMPOSE_DIR="${HAPPYTOKEN_DEPLOY_COMPOSE_DIR:?Set HAPPYTOKEN_DEPLOY_COMPOSE_DIR to your remote compose directory}"
+SERVICE="${HAPPYTOKEN_DEPLOY_SERVICE:-happytoken}"
+HEALTH_URL="${HAPPYTOKEN_DEPLOY_HEALTH_URL:-http://localhost:3000/health?format=json}"
 
 ssh "$REMOTE_HOST" "set -euo pipefail
 cd '$REMOTE_COMPOSE_DIR'

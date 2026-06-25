@@ -21,7 +21,7 @@ from PIL import Image
 
 OPENNANA_API = "https://api.opennana.com/api/prompts"
 OPENNANA_DETAIL_BASE = "https://opennana.com/awesome-prompt-gallery"
-USER_AGENT = "HappyImageResearchBot/0.2 (+local candidate gallery audit)"
+USER_AGENT = "Happy TokenResearchBot/0.2 (+local candidate gallery audit)"
 TEXT_TIMEOUT_SECS = 18
 IMAGE_TIMEOUT_SECS = 22
 

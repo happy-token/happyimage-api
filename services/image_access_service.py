@@ -18,7 +18,7 @@ def _clean(value: object) -> str:
 
 
 def _secret() -> str:
-    return _clean(config.session_secret) or _clean(config.auth_key)
+    return _clean(config.session_secret)
 
 
 def _ttl_seconds() -> int:

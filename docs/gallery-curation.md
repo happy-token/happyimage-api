@@ -6,10 +6,10 @@
 
 | 来源 | 路径 | 说明 |
 |:--|:--|:--|
-| 种子图库 | `data/image-gallery-seed/` | Docker 镜像内置，首次启动自动复制到 `data/` |
+| 种子图库 | `~/workspace/Happy Token/happytoken-gallery-source/image-gallery-seed/` | 源数据目录，用于导出 web 静态图库包 |
 | 候选图库 | `data/image-gallery-candidates/` | 外部采集的大规模图库，需手动同步 |
 
-种子索引文件: `data/image-gallery-seed/records/evolink_cases.json`
+种子索引文件: `~/workspace/Happy Token/happytoken-gallery-source/image-gallery-seed/records/evolink_cases.json`
 
 ## 分类规则
 
@@ -23,7 +23,7 @@
 
 ## 分类展示顺序
 
-由 `DISPLAY_CATEGORY_ORDER` 列表控制。`portrait` 固定排在第一位，其余按此顺序排列。数量来自后端 `/api/seed-gallery/facets` 的实时分类统计，不等同于首页精选图数量。
+由 `DISPLAY_CATEGORY_ORDER` 列表控制。`portrait` 固定排在第一位，其余按此顺序排列。数量来自导出的 `public/seed-gallery/static/items.json`，或兼容模式下后端 `/api/seed-gallery/facets` 的分类统计，不等同于首页精选图数量。
 
 | 序号 | 分类 | 当前数量 |
 |:--|:--|:--|

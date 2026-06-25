@@ -35,11 +35,12 @@ def create_storage_backend(data_dir: Path) -> StorageBackend:
     elif backend_type in ("sqlite", "postgres", "postgresql", "mysql", "database"):
         # 数据库存储
         database_url = os.getenv("DATABASE_URL", "").strip()
-        
-        if not database_url:
-            # 如果没有指定 DATABASE_URL，使用本地 SQLite
+
+        if not database_url and backend_type == "sqlite":
             database_url = f"sqlite:///{data_dir / 'accounts.db'}"
             print(f"[storage] No DATABASE_URL provided, using local SQLite: {database_url}")
+        elif not database_url:
+            raise ValueError("DATABASE_URL is required when STORAGE_BACKEND is postgres/mysql/database")
         else:
             print(f"[storage] Using database storage: {_mask_password(database_url)}")
         

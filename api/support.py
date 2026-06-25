@@ -2,18 +2,16 @@ from __future__ import annotations
 
 from contextvars import ContextVar
 from pathlib import Path
-from threading import Event, Thread
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
 
-from services.account_service import account_service
 from services.auth_service import auth_service
 from services.config import config
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST_DIR = BASE_DIR / "web_dist"
-_CURRENT_REQUEST: ContextVar[Request | None] = ContextVar("happyimage_current_request", default=None)
+_CURRENT_REQUEST: ContextVar[Request | None] = ContextVar("happytoken_current_request", default=None)
 
 
 def extract_bearer_token(authorization: str | None) -> str:
@@ -21,13 +19,6 @@ def extract_bearer_token(authorization: str | None) -> str:
     if scheme.lower() != "bearer" or not value.strip():
         return ""
     return value.strip()
-
-
-def _legacy_admin_identity(token: str) -> dict[str, object] | None:
-    auth_key = str(config.auth_key or "").strip()
-    if auth_key and token == auth_key:
-        return {"id": "admin", "name": "管理员", "role": "admin"}
-    return None
 
 
 def set_current_request(request: Request):
@@ -85,8 +76,6 @@ def _resolve_cookie_identity(request: Request) -> dict[str, object] | None:
     # Verify the user still exists and is enabled
     user_id = str(identity.get("id") or "")
     user_item = auth_service.get_key(user_id)
-    if user_item is None and user_id == "admin" and identity.get("role") == "admin" and config.auth_key:
-        return {"id": "admin", "name": "管理员", "role": "admin"}
     if user_item is None or not bool(user_item.get("enabled", True)):
         return None
 
@@ -95,14 +84,20 @@ def _resolve_cookie_identity(request: Request) -> dict[str, object] | None:
         "id": user_item.get("id", ""),
         "name": user_item.get("name", ""),
         "role": user_item.get("role", "user"),
-        "image_quota": user_item.get("image_quota"),
         "watermark_label": user_item.get("watermark_label") or "",
         "watermark_unlocked": bool(user_item.get("watermark_unlocked", False)),
+        "model_provider": user_item.get("model_provider") or "",
+        "model_base_url": user_item.get("model_base_url") or "",
+        "model_api_key": user_item.get("model_api_key") or "",
+        "model_api_key_configured": bool(user_item.get("model_api_key_configured")),
+        "model_providers": user_item.get("model_providers") if isinstance(user_item.get("model_providers"), list) else [],
+        "preferences": user_item.get("preferences") if isinstance(user_item.get("preferences"), dict) else {},
     }
     for key in ("auth_provider", "auth_subject", "email"):
         value = str(user_item.get(key) or "").strip()
         if value:
             fresh_identity[key] = value
+    fresh_identity.update(auth_service.get_model_gateway_config(user_id))
     return fresh_identity
 
 
@@ -113,7 +108,7 @@ def resolve_identity_for_request(
     """Resolve identity from a signed web cookie or Bearer token."""
     token = extract_bearer_token(authorization)
     if token:
-        identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
+        identity = auth_service.authenticate(token)
         if identity is None:
             raise HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})
         return identity
@@ -122,7 +117,7 @@ def resolve_identity_for_request(
     if cookie_identity is not None:
         return cookie_identity
 
-    identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
+    identity = auth_service.authenticate(token)
     if identity is None:
         raise HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})
     return identity
@@ -133,7 +128,7 @@ def require_identity(authorization: str | None, request: Request | None = None) 
     if active_request is not None:
         return resolve_identity_for_request(active_request, authorization)
     token = extract_bearer_token(authorization)
-    identity = _legacy_admin_identity(token) or auth_service.authenticate(token)
+    identity = auth_service.authenticate(token)
     if identity is None:
         raise HTTPException(status_code=401, detail={"error": "密钥无效或已失效，请重新登录"})
     return identity
@@ -152,68 +147,6 @@ def require_admin(authorization: str | None, request: Request | None = None) -> 
 
 def resolve_image_base_url(request: Request) -> str:
     return config.base_url or f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
-
-
-def raise_image_quota_error(exc: Exception) -> None:
-    message = str(exc)
-    if "no available image quota" in message.lower():
-        raise HTTPException(status_code=429, detail={"error": "no available image quota"}) from exc
-    raise HTTPException(status_code=502, detail={"error": message}) from exc
-
-
-def sanitize_cpa_pool(pool: dict | None) -> dict | None:
-    if not isinstance(pool, dict):
-        return None
-    return {key: value for key, value in pool.items() if key != "secret_key"}
-
-
-def sanitize_cpa_pools(pools: list[dict]) -> list[dict]:
-    return [sanitized for pool in pools if (sanitized := sanitize_cpa_pool(pool)) is not None]
-
-
-def sanitize_sub2api_server(server: dict | None) -> dict | None:
-    if not isinstance(server, dict):
-        return None
-    sanitized = {key: value for key, value in server.items() if key not in {"password", "api_key"}}
-    sanitized["has_api_key"] = bool(str(server.get("api_key") or "").strip())
-    return sanitized
-
-
-def sanitize_sub2api_servers(servers: list[dict]) -> list[dict]:
-    return [sanitized for server in servers if (sanitized := sanitize_sub2api_server(server)) is not None]
-
-
-def start_limited_account_watcher(stop_event: Event) -> Thread:
-    interval_seconds = config.refresh_account_interval_minute * 60
-
-    def worker() -> None:
-        while not stop_event.is_set():
-            try:
-                limited_tokens = account_service.list_limited_tokens()
-                expiring_tokens = account_service.list_expiring_access_tokens()
-                keepalive_tokens = account_service.list_refresh_token_keepalive_tokens()
-                tokens = list(dict.fromkeys([*limited_tokens, *expiring_tokens]))
-                expiring_token_set = set(expiring_tokens)
-                keepalive_tokens = [token for token in keepalive_tokens if token not in expiring_token_set]
-                if tokens:
-                    print(
-                        "[account-watcher] checking "
-                        f"{len(limited_tokens)} limited accounts, "
-                        f"{len(expiring_tokens)} expiring access tokens"
-                    )
-                    account_service.refresh_accounts(tokens)
-                if keepalive_tokens:
-                    print(f"[account-watcher] keepalive {len(keepalive_tokens)} refresh tokens")
-                    result = account_service.keepalive_refresh_tokens(keepalive_tokens)
-                    if result.get("errors"):
-                        print(f"[account-watcher] keepalive errors: {result['errors']}")
-            except Exception as exc:
-                print(f"[account-watcher] fail {exc}")
-            stop_event.wait(interval_seconds)
-
-    thread = Thread(target=worker, name="account-watcher", daemon=True)
-    thread.start()
-    return thread
 
 
 def resolve_web_asset(requested_path: str) -> Path | None:

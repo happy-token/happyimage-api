@@ -11,7 +11,7 @@ import requests
 from test.utils import save_image
 from utils.log import logger
 
-AUTH_KEY = "happyimage"
+AUTH_KEY = "happytoken"
 BASE_URL = "http://localhost:8000"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
 

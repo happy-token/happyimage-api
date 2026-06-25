@@ -1,6 +1,6 @@
 # Project Structure
 
-HappyImage API is organized around FastAPI routes, business services, protocol adapters, and storage backends. Keep new code close to the layer that owns the behavior.
+Happy Token API is organized around FastAPI routes, business services, protocol adapters, and storage backends. Keep new code close to the layer that owns the behavior.
 
 ## Top-level Layout
 
@@ -14,7 +14,7 @@ HappyImage API is organized around FastAPI routes, business services, protocol a
 | `scripts/` | Operational scripts, migrations, one-off maintenance tools |
 | `test/` | Pytest test suite |
 | `docs/` | Deployment, architecture, feature, and product notes |
-| `data/image-gallery-seed/` | Versioned seed gallery data and thumbnails |
+| `../happytoken-gallery-source/` | Large official gallery source data kept outside this git repository |
 
 ## Layering Guidelines
 
@@ -32,7 +32,30 @@ Shared helpers in `utils/` should avoid importing from `api/` or high-level serv
 
 Use `.env` for deployment-specific values such as secrets, public URLs, proxy settings, and storage credentials. Use `config.json` or the Web settings API for application settings that operators may change over time.
 
-Runtime data lives under `data/`, but only `data/image-gallery-seed/` is versioned. Generated logs, images, task state, databases, and local caches should remain untracked.
+Runtime data lives under `data/`. Generated logs, images, task state, databases, local caches, and exported official-gallery static packages should remain untracked.
+
+Generated caches and local work products should stay ignored and can be deleted when cleaning a workspace:
+
+| Path | Notes |
+|:--|:--|
+| `__pycache__/`, `*/__pycache__/` | Python bytecode cache. |
+| `.pytest_cache/` | Pytest local cache. |
+| `.worktrees/` | Temporary agent or feature worktrees; remove after merging or abandoning their branches. |
+| `.venv/` | Local Python dependency environment; keep if actively developing, otherwise recreate with `uv sync`. |
+
+Do not delete `.env`, `config.json`, or `data/*` during cleanup unless the operator explicitly wants to reset local runtime state. Those files can contain secrets, user history, generated images, and account data.
+
+## Documentation Map
+
+| Document | Purpose |
+|:--|:--|
+| `README.md` | Main setup, configuration, NewAPI overview, operations commands. |
+| `docs/architecture.md` | Mermaid architecture diagrams for deployment, route split, image data flow, auth, and storage. |
+| `docs/newapi-gateway.md` | Authoritative NewAPI integration and Happy Token Web model-gateway chain. |
+| `docs/technical-log.md` | Bug history, root causes, fixes, and verification notes for future sessions. |
+| `docs/docker-deployment.md` | Docker deployment and server operations. |
+| `docs/feature-status.en.md` | Feature support matrix. |
+| `docs/gallery-curation.md` | Gallery seed and curation workflow. |
 
 ## Script Conventions
 
