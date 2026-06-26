@@ -9,9 +9,8 @@
     "info",
     "warning"
   ],
-  "base_url": "",
-  "frontend_base_url": "",
-  "api_base_url": "",
+  "public_app_url": "",
+  "api_public_url": "",
   "cors_origins": [],
   "session_secret": "replace_with_a_different_strong_session_secret",
   "session_cookie_name": "happytoken_session",
@@ -33,6 +32,14 @@
     "client_secret": "",
     "scopes": "openid profile email",
     "allowed_email_domains": ""
+  },
+  "model_gateway": {
+    "gateway_api_base_url": "https://gateway.happy-token.cn/v1",
+    "gateway_management_url": "https://gateway.happy-token.cn",
+    "provision_url": "",
+    "provision_secret": "",
+    "sql_dsn": "",
+    "token_name": "HappyImage Default"
   },
   "image_parallel_generation": true,
   "image_poll_interval_secs": 10,

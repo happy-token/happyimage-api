@@ -1,6 +1,6 @@
 # Docker 部署指南
 
-本文说明 Happy Token API 使用 Docker Compose 启动、升级和排障的常用流程。生产主机、远程路径、账号、密钥、代理地址和第三方令牌请放在 `.env` 或服务器私有配置中，不要提交到 git。
+本文说明 HappyImage API 使用 Docker Compose 启动、升级和排障的常用流程。生产主机、远程路径、账号、密钥、代理地址和第三方令牌请放在 `.env`、`config.json` 或服务器私有配置中，不要提交到 git。
 
 ## 当前部署形态
 
@@ -8,19 +8,17 @@
 
 | 服务 | 容器名 | 默认端口 | 说明 |
 |:--|:--|:--|:--|
-| `happytoken-api` | `happytoken-api` | `8000` | FastAPI 后端，提供 OpenAI-compatible API、OIDC 回调、会话管理、用户图库、图片任务历史和 Web 管理接口 |
+| `happyimage-api` | `happytoken-api` | `8000` | FastAPI 后端，提供 OIDC 回调、会话管理、用户图库、图片任务历史和 Web 管理接口 |
 
-前端项目位于 [happytoken-web](https://github.com/happy-token/happytoken-web)，可单独部署。后端代码仍保留静态资源托管能力：如果镜像或运行目录中存在前端构建产物，后端会尝试直接返回 Web 页面；否则只提供 API。
-
-当前 `happytoken-web` Docker 镜像运行 Next.js server，而不是静态 nginx。这样生产 Docker 部署也能使用 Web middleware 将 `/api/*`、`/images/*` 转发到 Happy Token API，并将 `/v1/*` 转发到 NewAPI。
+前端项目位于 `happyimage-web`，可单独部署。Web middleware 只将 `/api/*`、`/images/*`、`/image-thumbnails/*` 和 `/health` 转发到 `BACKEND_URL`；Web 不再代理外部 model API 路径。
 
 ## 文件说明
 
 | 文件 | 用途 |
 |:--|:--|
 | `docker-compose.yml` | 默认 API 服务配置，宿主机端口 `8000` 映射到容器 `80` |
-| `.env.example` | 环境变量模板，复制为 `.env` 后填写本机或服务器配置 |
-| `config.example.json` | 应用配置模板，复制为 `config.json` 后可在设置页继续维护 |
+| `.env.example` | 基础设施环境变量模板，复制为 `.env` 后填写本机或服务器配置 |
+| `config.example.json` | 应用运行时配置模板，复制为 `config.json` 后可在设置页继续维护 |
 | `data/` | 运行数据目录，包含用户、日志、图片任务和缓存图片 |
 | `scripts/docker-entrypoint.sh` | 容器启动入口，负责初始化运行数据目录 |
 
@@ -29,18 +27,7 @@
 ```bash
 cp .env.example .env
 cp config.example.json config.json
-```
-
-编辑 `.env`，至少设置：
-
-```bash
-HAPPYTOKEN_SESSION_SECRET=generate-a-random-secret-at-least-32-chars
-```
-
-启动服务：
-
-```bash
-docker compose up -d --build
+docker compose up -d
 docker compose ps
 curl -sf http://localhost:8000/health?format=json
 ```
@@ -50,173 +37,106 @@ curl -sf http://localhost:8000/health?format=json
 | 服务 | 地址 |
 |:--|:--|
 | API 根地址 | `http://localhost:8000` |
-| OpenAI-compatible base URL | `http://localhost:8000/v1` |
 | 健康检查 | `http://localhost:8000/health?format=json` |
+
+首次部署后，使用 Web `/setup` 或管理设置页维护公开地址、会话密钥、OIDC、NewAPI 绑定、模型网关、图片存储、代理和安全设置。
 
 ## 预构建镜像
 
 `main` 分支推送后，GitHub Actions 会把 API 镜像发布到 GitHub Container Registry：
 
 ```bash
-docker pull ghcr.io/happy-token/happytoken-api:latest
+docker pull ghcr.io/happy-token/happyimage-api:latest
 ```
 
-镜像支持 `linux/amd64` 和 `linux/arm64`。当前默认 `docker-compose.yml` 仍使用本地构建，生产环境如果想直接使用预构建镜像，可以把服务中的 `build` 段移除并设置：
+镜像支持 `linux/amd64` 和 `linux/arm64`。当前默认 `docker-compose.yml` 使用：
 
 ```yaml
-image: ghcr.io/happy-token/happytoken-api:latest
+image: ghcr.io/happy-token/happyimage-api:latest
 ```
+
+## 配置优先级
+
+部署 `.env` 只保留基础设施项：
+
+| 变量 | 说明 |
+|:--|:--|
+| `STORAGE_BACKEND` | 存储后端，生产环境推荐 `postgres` |
+| `DATABASE_URL` | PostgreSQL / SQLite 连接地址；数据库存储时使用 |
+| `HAPPYTOKEN_API_PORT` | Compose 端口映射使用的宿主机端口 |
+| `HAPPYTOKEN_PYTHON_IMAGE` | Docker 构建基础 Python 镜像覆盖 |
+
+管理员运行时设置放在 `config.json`、首次 `/setup` 或 Web 管理设置页：
+
+| 设置 | 字段 |
+|:--|:--|
+| Public app URL | `public_app_url` |
+| Optional API public URL | `api_public_url` |
+| Session / cookie | `session_secret`、`session_cookie_name`、`session_cookie_domain`、`session_max_age_seconds` |
+| OAuth / OIDC | `oidc.enabled`、`issuer`、`client_id`、`client_secret`、`scopes`、`allowed_email_domains` |
+| Model gateway URLs | `model_gateway.gateway_api_base_url`、`model_gateway.gateway_management_url` |
+| NewAPI binding | `model_gateway.provision_url`、`provision_secret`、`sql_dsn`、`token_name` |
+| Proxy | `proxy` |
+| Image storage | `image_storage.*`、`image_retention_days`、`image_access_token_ttl_seconds` |
+| Safety settings | `sensitive_words`、`ai_review.*`、`global_system_prompt` |
+
+示例 `model_gateway.gateway_api_base_url` 可以是 `https://gateway.happy-token.cn/v1`。这是上游模型网关 URL，不是 HappyImage API 暴露的兼容入口。
+
+## Removed Variable Migration
+
+| Removed variable | New home |
+|:--|:--|
+| `MODEL_BACKEND_URL` | `model_gateway.gateway_api_base_url` in API runtime settings; user generation uses selected provider Base URL |
+| `MODEL_BACKEND_API_KEY` | Default/user provider API key managed by HappyImage API; NewAPI binding secrets live under `model_gateway.*` |
+| `NEXT_PUBLIC_MODEL_API_BASE_URL` | Removed with Web model proxying |
+| `HAPPYTOKEN_FRONTEND_BASE_URL` | `public_app_url` |
+| `HAPPYTOKEN_API_BASE_URL` | `api_public_url` |
+| `HAPPYTOKEN_CORS_ORIGINS` | `cors_origins` or derived from `public_app_url` |
+| `HAPPYTOKEN_NEWAPI_BASE_URL` | `model_gateway.gateway_api_base_url` |
+| `HAPPYTOKEN_NEWAPI_MANAGEMENT_URL` | `model_gateway.gateway_management_url` |
 
 ## 配置 OIDC 单点登录
 
-1. 在 OIDC 提供方（如 Google、Azure AD、Keycloak）创建 OAuth 应用，获取 Client ID 和 Client Secret。
-2. 设置回调地址：`<HAPPYTOKEN_API_BASE_URL>/api/auth/oidc/callback`，例如 `https://api.example.com/api/auth/oidc/callback`。
-3. 在 `.env` 中配置：
-
-```bash
-HAPPYTOKEN_SESSION_SECRET=generate-a-random-secret-at-least-32-chars
-HAPPYTOKEN_OIDC_ENABLED=true
-HAPPYTOKEN_OIDC_ISSUER=https://accounts.google.com
-HAPPYTOKEN_OIDC_CLIENT_ID=your-client-id.apps.googleusercontent.com
-HAPPYTOKEN_OIDC_CLIENT_SECRET=your-client-secret
-HAPPYTOKEN_API_BASE_URL=https://api.example.com
-HAPPYTOKEN_FRONTEND_BASE_URL=https://image.example.com
-HAPPYTOKEN_CORS_ORIGINS=https://image.example.com
-
-# 可选
-HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS=example.com
-```
-
-4. 重启服务：
-
-```bash
-docker compose up -d happytoken-api
-```
+1. 在 OIDC 提供方创建 OAuth 应用，获取 Client ID 和 Client Secret。
+2. 在 Web `/setup` 或管理设置页填写公开应用地址、可选公开 API 地址、session secret 和 OIDC 配置。
+3. 在 OIDC 提供方设置回调地址：`<api_public_url>/api/auth/oidc/callback`；如果 API 没有独立公开地址，则使用公开应用地址对应的 API 入口。
+4. 重启服务或保存设置后重新登录验证。
 
 生产环境注意事项：
 
 - 生产环境跨站登录通常需要 HTTPS，否则浏览器可能拒绝跨站 Cookie。
-- `HAPPYTOKEN_SESSION_SECRET` 必须是稳定随机字符串，更换后所有用户会退出登录。
-- `HAPPYTOKEN_CORS_ORIGINS` 必须包含前端公开地址。
+- Session secret 必须是稳定随机字符串，更换后所有用户会退出登录。
 - 管理员账号密码登录不受 OIDC 配置影响；OIDC 配错时可用已有管理员账号进入系统设置。
 
 ## 配置 NewAPI 模型网关
 
-如果号池管理、模型调试和上游账号设置已经迁移到 NewAPI，Happy Token API 可以只负责登录、图库、历史会话、私有图片和任务状态。模型供应商不再通过后端 `.env` 统一配置；普通用户登录后会自动获得默认 HappyToken 供应商，也可以在 Web 的“我的 -> 供应商”里添加其他预设或自定义供应商。后端按当前用户选中的供应商请求模型网关。
+如果号池管理、模型调试和上游账号设置已经迁移到 NewAPI，HappyImage API 可以只负责登录、图库、历史会话、私有图片和任务状态。模型供应商不再通过后端 `.env` 统一配置；普通用户登录后会自动获得默认 HappyToken 供应商，也可以在 Web 的“我的 -> 供应商”里添加其他预设或自定义供应商。
 
-NewAPI/HappyToken 自动绑定常用配置：
+NewAPI/HappyToken 自动绑定常用字段：
 
-```bash
-HAPPYTOKEN_NEWAPI_BASE_URL=https://gateway.happy-token.cn
-HAPPYTOKEN_NEWAPI_MANAGEMENT_URL=https://gateway.happy-token.cn
-HAPPYTOKEN_NEWAPI_TOKEN_NAME="HappyImage Default"
-
-# 二选一：优先使用受控 provisioning endpoint
-HAPPYTOKEN_NEWAPI_PROVISION_URL=http://newapi:3000/api/internal/happyimage/bind-token
-HAPPYTOKEN_NEWAPI_PROVISION_SECRET=replace-with-internal-secret
-
-# 或使用 NewAPI 数据库直连
-HAPPYTOKEN_NEWAPI_SQL_DSN=postgresql://newapi_user:newapi_pass@newapi-postgres:5432/newapi
-```
+| 字段 | 说明 |
+|:--|:--|
+| `model_gateway.gateway_api_base_url` | 上游模型网关 API 地址，例如 `https://gateway.happy-token.cn/v1` |
+| `model_gateway.gateway_management_url` | 上游管理入口，例如 `https://gateway.happy-token.cn` |
+| `model_gateway.token_name` | 自动创建 token 的名称 |
+| `model_gateway.provision_url` | 受控 provisioning endpoint |
+| `model_gateway.provision_secret` | provisioning endpoint 鉴权密钥 |
+| `model_gateway.sql_dsn` | 可选 NewAPI 数据库直连 DSN |
 
 OIDC 登录会尝试创建或复用 NewAPI 用户/token，并把它写成用户默认 HappyToken 供应商。`/api/auth/session` 会在用户已有 OIDC 身份但绑定仍是 pending/failed 时重试。`/settings/newapi` 是 HappyImage 原生管理页，读取 `/api/auth/newapi-management` 展示绑定状态和默认 API Key；它不依赖 NewAPI iframe 自动登录，因为 SQL/provisioning 不会给浏览器写入 `gateway.happy-token.cn` 的 session cookie。
 
-前端 `happytoken-web` 推荐使用同源代理：
-
-```bash
-BACKEND_URL=https://api.example.com
-MODEL_BACKEND_URL=https://newapi.example.com/v1
-MODEL_BACKEND_API_KEY=<newapi-token>
-NEXT_PUBLIC_EXTERNAL_MODEL_ADMIN=true
-```
-
-同源代理模式下不要设置 `NEXT_PUBLIC_API_BASE_URL`。让浏览器请求保持为 `/api/*`、`/images/*`、`/v1/*`，由 Web middleware 根据路径转发。完整说明见 [NewAPI Gateway](newapi-gateway.md)。
-
-Web Docker 运行示例：
+## Web Docker 运行示例
 
 ```bash
 docker run -p 3000:3000 \
-  -v /srv/happytoken/seed-gallery:/app/web/public/seed-gallery:ro \
+  -v /srv/happyimage/seed-gallery:/app/web/public/seed-gallery:ro \
   -e BACKEND_URL=https://api.example.com \
-  -e MODEL_BACKEND_URL=https://newapi.example.com/v1 \
-  -e MODEL_BACKEND_API_KEY=<newapi-token> \
-  happytoken-web
+  happyimage-web
 ```
 
-官方图库是 web 静态包，不再内置到 API 镜像。生成或更新静态包：
+同源代理模式下不要设置 `NEXT_PUBLIC_API_BASE_URL`。让浏览器请求保持为 `/api/*`、`/images/*`、`/image-thumbnails/*` 和 `/health`，由 Web middleware 转发到 `BACKEND_URL`。
 
-```bash
-uv run python scripts/pregenerate_seed_gallery_thumbnails.py \
-  --seed-dir ~/workspace/Happy Token/happytoken-gallery-source/image-gallery-seed \
-  --candidate-dir ~/workspace/Happy Token/happytoken-gallery-source/image-gallery-candidates \
-  --widths 640 \
-  --quiet
-
-uv run python scripts/export_seed_gallery_static.py \
-  --seed-dir ~/workspace/Happy Token/happytoken-gallery-source/image-gallery-seed \
-  --candidate-dir ~/workspace/Happy Token/happytoken-gallery-source/image-gallery-candidates \
-  --output /srv/happytoken/seed-gallery \
-  --copy-assets
-```
-
-`/srv/happytoken/seed-gallery` 应包含 `static/items.json`、`images/` 和 `thumbnails/w640/`。该目录可能很大，建议放在服务器磁盘、对象存储或 CDN，不要提交到 GitHub。
-
-## 配置优先级
-
-`HAPPYTOKEN_BASE_URL`、OIDC、会话和部署域名相关环境变量会覆盖 `config.json` 中的对应值。推荐把会话密钥和部署域名放在 `.env`，把功能开关和运行参数放在 `config.json` 或 Web 设置页。
-
-OIDC 配置在 Web 设置页修改后，Client Secret 会脱敏显示。保存时如果留空 Client Secret，会保留旧值；填入新值则替换。
-
-## 环境变量参考
-
-### 必填
-
-| 变量 | 说明 |
-|:--|:--|
-| `HAPPYTOKEN_SESSION_SECRET` | Web 登录会话签名密钥，建议至少 32 字符，生产环境必须稳定保存 |
-
-### 服务地址与 CORS
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `HAPPYTOKEN_BASE_URL` | 对外基础 URL，影响图片绝对地址 | 空 |
-| `HAPPYTOKEN_FRONTEND_BASE_URL` | 前端公开地址，OIDC 登录后重定向目标 | 空 |
-| `HAPPYTOKEN_API_BASE_URL` | 后端公开地址，用于构造 OIDC 回调 URL | `HAPPYTOKEN_BASE_URL` |
-| `HAPPYTOKEN_CORS_ORIGINS` | 允许的跨域来源，逗号分隔 | `HAPPYTOKEN_FRONTEND_BASE_URL` |
-图片生成供应商不再通过后端 `.env` 配置。普通用户在 Web 的“我的 -> 供应商”中保存并选择自己的 Base URL 和 API Key。
-
-### 会话
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `HAPPYTOKEN_SESSION_SECRET` | 会话签名密钥，Web 登录和 OIDC 登录必需 | 空 |
-| `HAPPYTOKEN_SESSION_COOKIE_NAME` | 会话 Cookie 名称 | `happytoken_session` |
-| `HAPPYTOKEN_SESSION_MAX_AGE_SECONDS` | 会话过期时间（秒） | `86400` |
-
-### OIDC
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `HAPPYTOKEN_OIDC_ENABLED` | 是否启用 OIDC 登录 | `false` |
-| `HAPPYTOKEN_OIDC_ISSUER` | OIDC 提供方 issuer URL | 空 |
-| `HAPPYTOKEN_OIDC_CLIENT_ID` | OAuth Client ID | 空 |
-| `HAPPYTOKEN_OIDC_CLIENT_SECRET` | OAuth Client Secret | 空 |
-| `HAPPYTOKEN_OIDC_SCOPES` | 请求的 scope | `openid profile email` |
-| `HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS` | 允许的邮箱域名，逗号分隔，留空不限制 | 空 |
-
-### 注册
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `HAPPYTOKEN_REGISTRATION_ENABLED` | 是否开放普通用户注册 | `false` |
-| `image_access_token_ttl_seconds` | 用户生成图片签名访问链接有效期，配置于 `config.json` | `86400` |
-
-### 存储
-
-| 变量 | 说明 | 默认值 |
-|:--|:--|:--|
-| `STORAGE_BACKEND` | 存储后端，生产环境推荐 `postgres` | `json` |
-| `DATABASE_URL` | PostgreSQL 连接地址；`STORAGE_BACKEND=postgres` 时必填 | 空 |
+官方图库是 Web 静态包，不再内置到 API 镜像。生成或更新静态包请在 Web 项目执行 `pnpm run gallery:build`，或在服务器上挂载已生成的 `seed-gallery` 目录。
 
 ## 存储后端
 
@@ -226,7 +146,7 @@ PostgreSQL 示例：
 
 ```bash
 STORAGE_BACKEND=postgres
-DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happytoken
+DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happyimage
 ```
 
 ## 运行数据与服务器迁移
@@ -243,17 +163,17 @@ DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happytoken
 | `data/image_tasks.json`、`data/editable_file_tasks.json` | 图片 / PPT / PSD 任务状态 | 需要保留任务历史时迁移 |
 | `data/auth_keys.json`、`data/accounts.db` | 用户密钥、用户数据或 SQLite 数据库 | 敏感，按生产数据迁移 |
 | `data/logs.jsonl`、`data/share_drafts.json`、`data/image_tags.json` | 日志、分享草稿、图片标签 | 需要保留后台数据时迁移 |
-| `../happytoken-gallery-source/image-gallery-seed/` | 官方图库源数据 | 仓库外保存，用于导出 web 静态包；生产不需要挂载到 API 容器 |
+| `../happyimage-gallery-source/image-gallery-seed/` | 官方图库源数据 | 仓库外保存，用于导出 Web 静态包；生产不需要挂载到 API 容器 |
 
 完整迁移示例：
 
 ```bash
-rsync -av --progress ./data/ user@server:/srv/happytoken-api/data/
-rsync -av --progress ./config.json user@server:/srv/happytoken-api/config.json
-rsync -av --progress ./.env user@server:/srv/happytoken-api/.env
+rsync -av --progress ./data/ user@server:/srv/happyimage-api/data/
+rsync -av --progress ./config.json user@server:/srv/happyimage-api/config.json
+rsync -av --progress ./.env user@server:/srv/happyimage-api/.env
 
 ssh user@server
-cd /srv/happytoken-api
+cd /srv/happyimage-api
 chmod 700 data
 chmod 600 .env config.json
 docker compose up -d
@@ -281,8 +201,8 @@ docker compose up -d --build
 
 ```bash
 git pull
-docker compose build happytoken-api
-docker compose up -d happytoken-api
+docker compose pull
+docker compose up -d
 docker compose ps
 curl -sf http://localhost:8000/health?format=json
 ```
@@ -310,31 +230,4 @@ docker compose build --no-cache happytoken-api
 docker compose up -d happytoken-api
 ```
 
-如果 Docker Desktop 报本地镜像 blob `input/output error`，通常是 Docker 本地镜像存储损坏。可以先尝试删除本项目镜像并重建：
-
-```bash
-docker image rm happytoken-api:latest
-docker compose build --no-cache
-docker compose up -d
-```
-
-如果连 `docker image ls` 都报同类错误，需要重启 Docker Desktop；仍无法恢复时，再考虑清理 Docker Desktop 的构建缓存或重置本地镜像数据。
-
-## 常见问题
-
-**OIDC 登录后会话立即失效**
-
-检查：
-
-- `HAPPYTOKEN_SESSION_SECRET` 是否已设置
-- `HAPPYTOKEN_FRONTEND_BASE_URL` 和 `HAPPYTOKEN_API_BASE_URL` 是否正确
-- 生产环境是否使用 HTTPS
-- `HAPPYTOKEN_CORS_ORIGINS` 是否包含前端地址
-
-**OIDC 回调返回 state 不匹配**
-
-通常是用户在浏览器中打开了多次授权页面。重新点击登录按钮即可。
-
-**管理员无法登录**
-
-管理员账号密码登录不受 OIDC 配置影响。使用已有管理员账号登录后即可修复 OIDC 配置。
+如果 Docker Desktop 报本地镜像 blob `input/output error`，通常是 Docker 本地镜像存储损坏。可以先尝试删除本项目镜像并重建；如果连 `docker image ls` 都报同类错误，需要重启 Docker Desktop。
