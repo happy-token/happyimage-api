@@ -122,6 +122,50 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(response["model_gateway"]["gateway_api_base_url"], "https://gateway.happy-token.cn/v1")
         self.assertEqual(response["model_gateway"]["gateway_management_url"], "https://gateway.happy-token.cn")
 
+    def test_update_restores_in_memory_config_when_runtime_save_fails(self) -> None:
+        class FailingRuntimeStorage:
+            def __init__(self) -> None:
+                self.runtime_config: dict[str, object] = {
+                    "public_app_url": "https://old.example.com"
+                }
+
+            def load_accounts(self) -> list[dict[str, object]]:
+                return []
+
+            def save_accounts(self, accounts: list[dict[str, object]]) -> None:
+                pass
+
+            def load_auth_keys(self) -> list[dict[str, object]]:
+                return []
+
+            def save_auth_keys(self, auth_keys: list[dict[str, object]]) -> None:
+                pass
+
+            def load_runtime_config(self) -> dict[str, object]:
+                return dict(self.runtime_config)
+
+            def runtime_config_exists(self) -> bool:
+                return True
+
+            def save_runtime_config(self, config: dict[str, object]) -> None:
+                raise RuntimeError("runtime save failed")
+
+            def health_check(self) -> dict[str, object]:
+                return {"status": "healthy"}
+
+            def get_backend_info(self) -> dict[str, object]:
+                return {"type": "memory"}
+
+        store = self.config_module.ConfigStore(
+            Path("ignored-config.json"), storage_backend=FailingRuntimeStorage()
+        )
+
+        with self.assertRaises(RuntimeError):
+            store.update({"public_app_url": "https://new.example.com"})
+
+        self.assertEqual(store.data, {"public_app_url": "https://old.example.com"})
+        self.assertEqual(store.public_app_url, "https://old.example.com")
+
     def test_legacy_base_url_is_api_public_url_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "config.json"

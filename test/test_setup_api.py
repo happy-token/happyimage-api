@@ -1,5 +1,6 @@
 import concurrent.futures
 import multiprocessing
+import os
 import tempfile
 import threading
 import unittest
@@ -206,6 +207,76 @@ class SetupAPITests(unittest.TestCase):
 
         auth = self.make_auth_service()
         self.assertEqual(len(auth.list_keys("admin")), 1)
+
+    def test_git_first_admin_creation_is_atomic_across_instances(self) -> None:
+        try:
+            from git import Repo
+            from services.auth_service import AuthService
+            from services.storage.git_storage import GitStorageBackend
+        except ImportError as exc:
+            self.skipTest(f"git storage dependencies unavailable: {exc}")
+
+        remote_path = self.data_dir / "remote.git"
+        seed_path = self.data_dir / "seed"
+        Repo.init(remote_path, bare=True)
+        seed_repo = Repo.clone_from(str(remote_path), seed_path)
+        (seed_path / "auth_keys.json").write_text('{"items": []}\n', encoding="utf-8")
+        seed_repo.index.add(["auth_keys.json"])
+
+        git_env = {
+            "GIT_AUTHOR_NAME": "HappyImage Tests",
+            "GIT_AUTHOR_EMAIL": "tests@example.com",
+            "GIT_COMMITTER_NAME": "HappyImage Tests",
+            "GIT_COMMITTER_EMAIL": "tests@example.com",
+        }
+        with mock.patch.dict(os.environ, git_env, clear=False):
+            seed_repo.index.commit("Seed auth keys")
+            seed_repo.git.branch("-M", "main")
+            seed_repo.remote("origin").push("main")
+
+            auth_one = AuthService(
+                GitStorageBackend(
+                    str(remote_path),
+                    "",
+                    branch="main",
+                    local_cache_dir=self.data_dir / "cache-one",
+                )
+            )
+            auth_two = AuthService(
+                GitStorageBackend(
+                    str(remote_path),
+                    "",
+                    branch="main",
+                    local_cache_dir=self.data_dir / "cache-two",
+                )
+            )
+            ready = threading.Barrier(2)
+
+            def create(auth: AuthService, candidate: str) -> tuple[bool, str]:
+                ready.wait()
+                try:
+                    item = auth.create_first_admin_with_value(
+                        name=f"Owner {candidate}",
+                        key=f"owner-secret-key-{candidate}",
+                    )
+                except ValueError as exc:
+                    return False, str(exc)
+                return True, str(item["id"])
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [
+                    executor.submit(create, auth_one, "one"),
+                    executor.submit(create, auth_two, "two"),
+                ]
+                results = [future.result() for future in futures]
+
+        successes = [result for result in results if result[0]]
+        failures = [result for result in results if not result[0]]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0][1], "初始化已完成")
+        self.assertEqual(len(auth_one.list_keys("admin")), 1)
+        self.assertEqual(len(auth_two.list_keys("admin")), 1)
 
     def test_setup_status_open_when_no_admin_exists(self) -> None:
         client = self.make_client()

@@ -137,13 +137,43 @@ class GitStorageBackend(StorageBackend):
         normalized_role = str(role or "").strip()
         if not normalized_role:
             return False
-        with _auth_key_repo_lock(self.local_cache_dir, self.auth_keys_file_path):
-            auth_keys = self.load_auth_keys()
-            if any(key.get("role") == normalized_role for key in auth_keys):
-                return False
-            auth_keys.append(dict(item))
-            self.save_auth_keys(auth_keys)
-            return True
+        for _attempt in range(3):
+            with _auth_key_repo_lock(self.local_cache_dir, self.auth_keys_file_path):
+                repo = self._clone_or_pull()
+                file_full_path = Path(repo.working_dir) / self.auth_keys_file_path
+                auth_keys = self._load_auth_keys_from_file(file_full_path)
+                if any(key.get("role") == normalized_role for key in auth_keys):
+                    return False
+                auth_keys.append(dict(item))
+                file_full_path.parent.mkdir(parents=True, exist_ok=True)
+                file_full_path.write_text(
+                    json.dumps({"items": auth_keys}, ensure_ascii=False, indent=2)
+                    + "\n",
+                    encoding="utf-8",
+                )
+                repo.index.add([self.auth_keys_file_path])
+                if repo.is_dirty():
+                    repo.index.commit("Create first auth key")
+                try:
+                    push_results = repo.remote("origin").push(self.branch)
+                    if any(
+                        result.flags
+                        & (
+                            result.ERROR
+                            | result.REJECTED
+                            | result.REMOTE_REJECTED
+                        )
+                        for result in push_results
+                    ):
+                        raise GitCommandError("git push", "push rejected")
+                    return True
+                except GitCommandError:
+                    try:
+                        repo.git.reset("--hard", f"origin/{self.branch}")
+                    except GitCommandError:
+                        pass
+                    continue
+        return False
 
     def delete_first_auth_key(
         self, role: str, key_id: str, key_hash: str
@@ -172,6 +202,15 @@ class GitStorageBackend(StorageBackend):
 
     def _load_json_file(self, file_path: str) -> list[dict[str, Any]]:
         data = self._load_json_value(file_path)
+        return data if isinstance(data, list) else []
+
+    @staticmethod
+    def _load_auth_keys_from_file(file_full_path: Path) -> list[dict[str, Any]]:
+        if not file_full_path.exists():
+            return []
+        data = json.loads(file_full_path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            data = data.get("items")
         return data if isinstance(data, list) else []
 
     def _load_json_value(self, file_path: str) -> Any:

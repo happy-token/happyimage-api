@@ -523,8 +523,13 @@ class ConfigStore:
         next_data.pop("auto_relogin_after_refresh", None)
         next_data.pop("backup", None)
         next_data.pop("chat_completion_cache", None)
+        previous_data = dict(self.data)
         self.data = next_data
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            self.data = previous_data
+            raise
         return self.get()
 
     def get_image_storage_settings(self) -> dict[str, object]:
