@@ -333,11 +333,14 @@ def _admin_exists() -> bool:
 
 
 def _setup_status_payload() -> dict[str, object]:
-    return {
+    setup_required = not _admin_exists()
+    payload: dict[str, object] = {
         "ok": True,
-        "setup_required": not _admin_exists(),
-        "storage": config.get_storage_backend().get_backend_info(),
+        "setup_required": setup_required,
     }
+    if setup_required:
+        payload["storage"] = config.get_storage_backend().get_backend_info()
+    return payload
 
 
 def _normalize_setup_config(body: SetupRequest) -> dict[str, object]:
@@ -476,7 +479,15 @@ def create_router(app_version: str) -> APIRouter:
                 name=body.admin_name.strip() or "管理员",
                 key=admin_key,
             )
-            config_response = config.update(next_config)
+            try:
+                config_response = config.update(next_config)
+            except Exception:
+                await run_in_threadpool(
+                    auth_service.delete_first_admin_if_key_matches,
+                    str(admin.get("id") or ""),
+                    admin_key,
+                )
+                raise
         except ValueError as exc:
             if str(exc) == "初始化已完成":
                 raise HTTPException(

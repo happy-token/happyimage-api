@@ -14,13 +14,14 @@ class SetupAPITests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.data_dir = Path(self.tmp.name)
 
-    def make_client(self):
+    def make_client(self, *, base_url: str = "http://testserver"):
         from services import config as config_module
         from services.storage.json_storage import JSONStorageBackend
         from services.auth_service import AuthService
         import api.support as support_module
         import api.system as system_module
         import api.app as app_module
+        import services.web_session_service as web_session_module
 
         storage = JSONStorageBackend(
             self.data_dir / "accounts.json",
@@ -31,17 +32,21 @@ class SetupAPITests(unittest.TestCase):
             self.data_dir / "config.json", storage_backend=storage
         )
         test_auth = AuthService(storage)
+        self.test_config = test_config
+        self.test_auth = test_auth
 
         patches = [
             mock.patch.object(config_module, "config", test_config),
             mock.patch.object(support_module, "config", test_config),
+            mock.patch.object(support_module, "auth_service", test_auth),
             mock.patch.object(system_module, "config", test_config),
             mock.patch.object(system_module, "auth_service", test_auth),
+            mock.patch.object(web_session_module, "config", test_config),
         ]
         for patcher in patches:
             patcher.start()
             self.addCleanup(patcher.stop)
-        return TestClient(app_module.create_app())
+        return TestClient(app_module.create_app(), base_url=base_url)
 
     def make_auth_service(self):
         from services.storage.json_storage import JSONStorageBackend
@@ -86,6 +91,7 @@ class SetupAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["setup_required"], True)
+        self.assertIn("storage", response.json())
 
     def test_setup_creates_first_admin_and_settings(self) -> None:
         client = self.make_client()
@@ -121,13 +127,44 @@ class SetupAPITests(unittest.TestCase):
         self.assertEqual(body["config"]["oidc"]["client_secret_configured"], True)
         self.assertEqual(body["admin"]["role"], "admin")
 
+        status = client.get("/api/setup/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["setup_required"], False)
+        self.assertNotIn("storage", status.json())
+
         second = client.post(
             "/api/setup", json={"admin_name": "Other", "admin_key": "second-secret"}
         )
         self.assertEqual(second.status_code, 403)
 
-    def test_admin_key_login_works_when_oidc_is_unavailable(self) -> None:
+    def test_setup_rolls_back_first_admin_when_config_save_fails(self) -> None:
         client = self.make_client()
+
+        with mock.patch.object(
+            self.test_config, "update", side_effect=ValueError("config save failed")
+        ):
+            response = client.post(
+                "/api/setup",
+                json={
+                    "admin_name": "Owner",
+                    "admin_key": "owner-secret-key",
+                    "public_app_url": "https://image.example.com",
+                    "session_secret": "session-secret-with-at-least-32-characters",
+                    "oidc": {"enabled": False},
+                    "model_gateway": {
+                        "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+        status = client.get("/api/setup/status")
+        self.assertEqual(status.status_code, 200)
+        self.assertEqual(status.json()["setup_required"], True)
+
+    def test_admin_key_login_works_when_oidc_is_unavailable(self) -> None:
+        client = self.make_client(base_url="https://image.example.com")
         client.post(
             "/api/setup",
             json={
@@ -149,6 +186,11 @@ class SetupAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["role"], "admin")
+        self.assertIn("httponly", response.headers.get("set-cookie", "").lower())
+
+        settings_response = client.get("/api/settings")
+        self.assertEqual(settings_response.status_code, 200)
+        self.assertIn("config", settings_response.json())
 
     def test_admin_key_login_rejects_invalid_key(self) -> None:
         client = self.make_client()

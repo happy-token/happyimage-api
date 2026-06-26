@@ -427,6 +427,31 @@ class AuthService:
             self._save()
             return self._public_item(item)
 
+    def delete_first_admin_if_key_matches(self, key_id: str, raw_key: str) -> bool:
+        normalized_id = self._clean(key_id)
+        candidate = self._clean(raw_key)
+        if not normalized_id or not candidate:
+            return False
+        candidate_hash = _hash_key(candidate)
+        with self._lock:
+            self._reload_locked()
+            for index, item in enumerate(self._items):
+                if item.get("id") != normalized_id or item.get("role") != "admin":
+                    continue
+                if not hmac.compare_digest(
+                    self._clean(item.get("key_hash")), candidate_hash
+                ):
+                    return False
+                remaining_items = self._items[:index] + self._items[index + 1 :]
+                if any(
+                    next_item.get("role") == "admin" for next_item in remaining_items
+                ):
+                    return False
+                self._items = remaining_items
+                self._save()
+                return True
+        return False
+
     def update_key(
         self,
         key_id: str,
