@@ -668,6 +668,34 @@ class ConfigLoadingTests(unittest.TestCase):
                 store.data, {"public_app_url": "https://old.example.com"}
             )
 
+    def test_git_push_result_failure_flags_include_remote_failure_and_no_match(self) -> None:
+        try:
+            from services.storage.git_storage import GitStorageBackend
+        except ImportError as exc:
+            self.skipTest(f"git storage dependencies unavailable: {exc}")
+
+        class FakePushResult:
+            ERROR = 1
+            REJECTED = 2
+            REMOTE_REJECTED = 4
+            REMOTE_FAILURE = 8
+            NO_MATCH = 16
+
+            def __init__(self, flags: int) -> None:
+                self.flags = flags
+
+        self.assertTrue(
+            GitStorageBackend._push_result_failed(
+                FakePushResult(FakePushResult.REMOTE_FAILURE)
+            )
+        )
+        self.assertTrue(
+            GitStorageBackend._push_result_failed(
+                FakePushResult(FakePushResult.NO_MATCH)
+            )
+        )
+        self.assertFalse(GitStorageBackend._push_result_failed(FakePushResult(0)))
+
     def test_config_store_uses_database_storage_backend_for_runtime_settings(self) -> None:
         try:
             from services.storage.database_storage import DatabaseStorageBackend

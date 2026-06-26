@@ -278,6 +278,68 @@ class SetupAPITests(unittest.TestCase):
         self.assertEqual(len(auth_one.list_keys("admin")), 1)
         self.assertEqual(len(auth_two.list_keys("admin")), 1)
 
+    def test_git_first_admin_push_failure_is_not_reported_as_existing_admin(self) -> None:
+        try:
+            from git import Repo
+            from git.exc import GitCommandError
+            from services.auth_service import AuthService
+            from services.storage.git_storage import GitStorageBackend
+        except ImportError as exc:
+            self.skipTest(f"git storage dependencies unavailable: {exc}")
+
+        remote_path = self.data_dir / "remote.git"
+        seed_path = self.data_dir / "seed"
+        try:
+            old_cwd = os.getcwd()
+        except FileNotFoundError:
+            old_cwd = str(Path(__file__).resolve().parents[1])
+        os.chdir(Path(__file__).resolve().parents[1])
+        try:
+            Repo.init(remote_path, bare=True)
+            seed_repo = Repo.clone_from(str(remote_path), seed_path)
+            (seed_path / "auth_keys.json").write_text(
+                '{"items": []}\n', encoding="utf-8"
+            )
+            seed_repo.index.add(["auth_keys.json"])
+
+            git_env = {
+                "GIT_AUTHOR_NAME": "HappyImage Tests",
+                "GIT_AUTHOR_EMAIL": "tests@example.com",
+                "GIT_COMMITTER_NAME": "HappyImage Tests",
+                "GIT_COMMITTER_EMAIL": "tests@example.com",
+            }
+            with mock.patch.dict(os.environ, git_env, clear=False):
+                seed_repo.index.commit("Seed auth keys")
+                seed_repo.git.branch("-M", "main")
+                seed_repo.remote("origin").push("main")
+
+                backend = GitStorageBackend(
+                    str(remote_path),
+                    "",
+                    branch="main",
+                    local_cache_dir=self.data_dir / "cache",
+                )
+                auth = AuthService(backend)
+
+                with mock.patch.object(
+                    backend,
+                    "_push_or_raise",
+                    side_effect=GitCommandError("git push", "network failed"),
+                ):
+                    with self.assertRaises(GitCommandError):
+                        auth.create_first_admin_with_value(
+                            name="Owner",
+                            key="owner-secret-key",
+                        )
+        finally:
+            os.chdir(
+                old_cwd
+                if Path(old_cwd).exists()
+                else Path(__file__).resolve().parents[1]
+            )
+
+        self.assertEqual(backend.load_auth_keys(), [])
+
     def test_setup_status_open_when_no_admin_exists(self) -> None:
         client = self.make_client()
 

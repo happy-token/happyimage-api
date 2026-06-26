@@ -157,12 +157,19 @@ class GitStorageBackend(StorageBackend):
                 try:
                     self._push_or_raise(repo)
                     return True
-                except GitCommandError:
+                except GitCommandError as exc:
                     try:
+                        repo.remote("origin").fetch(self.branch)
                         repo.git.reset("--hard", f"origin/{self.branch}")
+                        refreshed_keys = self._load_auth_keys_from_file(file_full_path)
+                        if any(
+                            key.get("role") == normalized_role
+                            for key in refreshed_keys
+                        ):
+                            return False
                     except GitCommandError:
                         pass
-                    continue
+                    raise exc
         return False
 
     def delete_first_auth_key(
@@ -225,16 +232,21 @@ class GitStorageBackend(StorageBackend):
 
     def _push_or_raise(self, repo: Repo) -> None:
         push_results = repo.remote("origin").push(self.branch)
-        if any(
+        if any(self._push_result_failed(result) for result in push_results):
+            raise GitCommandError("git push", "push rejected")
+
+    @staticmethod
+    def _push_result_failed(result: Any) -> bool:
+        return bool(
             result.flags
             & (
                 result.ERROR
                 | result.REJECTED
                 | result.REMOTE_REJECTED
+                | result.REMOTE_FAILURE
+                | result.NO_MATCH
             )
-            for result in push_results
-        ):
-            raise GitCommandError("git push", "push rejected")
+        )
 
     def health_check(self) -> dict[str, Any]:
         """健康检查"""
