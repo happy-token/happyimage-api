@@ -4,7 +4,9 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from services.config import config
 from services.share_draft_service import ShareDraftService
 
 
@@ -142,14 +144,15 @@ class ShareDraftServiceTests(unittest.TestCase):
             path = Path(tmp_dir) / "share_drafts.json"
             service = ShareDraftService(path)
 
-            saved = service.save_draft(
-                OWNER,
-                make_payload(
-                    image_url="http://app.test/images/2026/06/cat.png?image_token=old-token",
-                ),
-            )
-            raw_text = path.read_text(encoding="utf-8")
-            listed = service.list_drafts(OWNER)["items"][0]
+            with mock.patch.dict(config.data, {"session_secret": "share-test-secret"}, clear=False):
+                saved = service.save_draft(
+                    OWNER,
+                    make_payload(
+                        image_url="http://app.test/images/2026/06/cat.png?image_token=old-token",
+                    ),
+                )
+                raw_text = path.read_text(encoding="utf-8")
+                listed = service.list_drafts(OWNER)["items"][0]
 
             self.assertEqual(saved["image_path"], "2026/06/cat.png")
             self.assertNotIn("old-token", raw_text)

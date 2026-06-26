@@ -9,6 +9,7 @@ from unittest import mock
 from PIL import Image
 
 from services import image_service
+from services.config import config
 from services.image_storage_service import ImageStorageService
 
 
@@ -72,7 +73,8 @@ class ImageStorageServiceTests(unittest.TestCase):
         return ImageStorageService(self.data_dir / "image_index.json")
 
     def test_local_mode_saves_to_local_directory(self):
-        stored = self.service().save(png_bytes(), "http://app.test", owner_id="owner-1")
+        with mock.patch.dict(config.data, {"session_secret": "image-test-secret"}, clear=False):
+            stored = self.service().save(png_bytes(), "http://app.test", owner_id="owner-1")
 
         self.assertEqual(stored.storage, "local")
         self.assertTrue((self.images_dir / stored.rel).is_file())

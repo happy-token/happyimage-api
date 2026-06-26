@@ -11,6 +11,16 @@ from services.auth_service import auth_service
 from services.config import config
 
 
+def _runtime_config(**overrides: object):
+    values: dict[str, object] = {
+        "session_secret": "cookie-test-session-secret",
+        "public_app_url": "http://localhost:3000",
+        "local_password_login_enabled": True,
+    }
+    values.update(overrides)
+    return mock.patch.dict(config.data, values, clear=False)
+
+
 def _create_password_account(
     role: str = "admin", prefix: str = "account"
 ) -> tuple[str, str]:
@@ -45,15 +55,7 @@ def test_password_login_disabled_by_default_returns_unified_login_error():
 
 
 def test_password_login_can_be_enabled_for_emergency_ops():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             response = _login_password(client, prefix="emergency-admin")[2]
 
@@ -83,15 +85,7 @@ def test_register_disabled_even_when_registration_enabled():
 
 
 def test_password_login_sets_cookie_and_cookie_authenticates_admin_api():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             login_response = _login_password(client, prefix="cookie-admin")[2]
             assert "httponly" in login_response.headers.get("set-cookie", "").lower()
@@ -107,15 +101,7 @@ def test_password_login_sets_cookie_and_cookie_authenticates_admin_api():
 
 
 def test_session_accepts_bearer_token_when_cookie_is_missing():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             _, password = _create_password_account(role="admin", prefix="bearer-admin")
             response = client.get(
@@ -128,15 +114,7 @@ def test_session_accepts_bearer_token_when_cookie_is_missing():
 
 
 def test_admin_created_user_does_not_include_image_quota():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             _login_password(client, prefix="quota-admin")
 
@@ -156,15 +134,7 @@ def test_admin_created_user_does_not_include_image_quota():
 
 
 def test_user_profile_can_update_watermark_label():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             _login_password(client, prefix="profile-admin")
 
@@ -190,15 +160,7 @@ def test_user_profile_can_update_watermark_label():
 
 
 def test_user_profile_model_providers_can_be_selected_and_preserve_keys():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             _login_password(client, prefix="provider-admin")
 
@@ -272,15 +234,7 @@ def test_user_profile_model_providers_can_be_selected_and_preserve_keys():
 
 
 def test_user_profile_preferences_sync_to_account():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             user_name, user_key = _create_password_account(
                 role="user", prefix="prefs-user"
@@ -325,15 +279,7 @@ def test_user_profile_preferences_sync_to_account():
 
 
 def test_admin_profile_can_sync_preferences_without_provider_fields():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             _login_password(client, prefix="prefs-admin")
 
@@ -354,15 +300,9 @@ def test_admin_profile_can_sync_preferences_without_provider_fields():
 
 
 def test_test_user_password_login_is_case_insensitive():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_TEST_ACCOUNTS_ENABLED": "true",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
+    with (
+        mock.patch.dict(os.environ, {"HAPPYTOKEN_TEST_ACCOUNTS_ENABLED": "true"}, clear=False),
+        _runtime_config(),
     ):
         fake_identity = {"id": "user", "name": "user", "role": "user"}
         with mock.patch(
@@ -387,14 +327,7 @@ def test_local_image_accepts_bearer_token_when_signed_link_is_missing(tmp_path):
         b"\xff?\x00\x05\xfe\x02\xfeA\xe2!\xbc\x00\x00\x00\x00IEND\xaeB`\x82"
     )
     try:
-        with mock.patch.dict(
-            os.environ,
-            {
-                "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-                "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            },
-            clear=False,
-        ):
+        with _runtime_config(local_password_login_enabled=False):
             with TestClient(create_app()) as client:
                 _, password = _create_password_account(
                     role="admin", prefix="image-bearer"
@@ -411,15 +344,7 @@ def test_local_image_accepts_bearer_token_when_signed_link_is_missing(tmp_path):
 
 
 def test_cookie_auth_rejects_untrusted_write_origin():
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_SESSION_SECRET": "cookie-test-session-secret",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://localhost:3000",
-            "HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true",
-        },
-        clear=False,
-    ):
+    with _runtime_config():
         with TestClient(create_app()) as client:
             _login_password(client, prefix="origin-admin")
 

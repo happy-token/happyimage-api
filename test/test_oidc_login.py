@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
@@ -8,23 +7,36 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import api.auth_oidc as auth_oidc_api
+from services.config import config
 from services.oidc_service import OIDCService
 from services.web_session_service import web_session_service
+
+
+def _oidc_settings(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "enabled": True,
+        "issuer": "https://issuer.example",
+        "client_id": "happytoken",
+        "client_secret": "secret",
+    }
+    values.update(overrides)
+    return values
+
+
+def _runtime_config(**overrides: object):
+    values: dict[str, object] = {
+        "session_secret": "oidc-session-secret",
+        "public_app_url": "https://web.example.com",
+        "oidc": _oidc_settings(),
+    }
+    values.update(overrides)
+    return mock.patch.dict(config.data, values, clear=False)
 
 
 def test_oidc_authorize_and_callback_reuse_absolute_redirect_uri():
     service = OIDCService()
     with (
-        mock.patch.dict(
-            os.environ,
-            {
-                "HAPPYTOKEN_OIDC_ENABLED": "true",
-                "HAPPYTOKEN_OIDC_ISSUER": "https://issuer.example",
-                "HAPPYTOKEN_OIDC_CLIENT_ID": "happytoken",
-                "HAPPYTOKEN_OIDC_CLIENT_SECRET": "secret",
-            },
-            clear=False,
-        ),
+        mock.patch.dict(config.data, {"oidc": _oidc_settings()}, clear=False),
         mock.patch.object(
             service,
             "_fetch_discovery",
@@ -86,15 +98,7 @@ def test_oidc_callback_session_cookie_contains_external_identity():
     }
 
     with (
-        mock.patch.dict(
-            os.environ,
-            {
-                "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
-                "HAPPYTOKEN_OIDC_ENABLED": "true",
-                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://web.example.com",
-            },
-            clear=False,
-        ),
+        _runtime_config(),
         mock.patch.object(
             auth_oidc_api.oidc_service,
             "handle_callback",
@@ -157,15 +161,7 @@ def test_oidc_callback_applies_newapi_default_provider_when_binding_succeeds():
     }
 
     with (
-        mock.patch.dict(
-            os.environ,
-            {
-                "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
-                "HAPPYTOKEN_OIDC_ENABLED": "true",
-                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://web.example.com",
-            },
-            clear=False,
-        ),
+        _runtime_config(),
         mock.patch.object(
             auth_oidc_api.oidc_service,
             "handle_callback",
@@ -250,15 +246,7 @@ def test_oidc_callback_allows_login_when_newapi_binding_is_pending():
     }
 
     with (
-        mock.patch.dict(
-            os.environ,
-            {
-                "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
-                "HAPPYTOKEN_OIDC_ENABLED": "true",
-                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://web.example.com",
-            },
-            clear=False,
-        ),
+        _runtime_config(),
         mock.patch.object(
             auth_oidc_api.oidc_service,
             "handle_callback",
@@ -327,15 +315,7 @@ def test_oidc_callback_allows_login_when_newapi_provider_apply_fails():
     }
 
     with (
-        mock.patch.dict(
-            os.environ,
-            {
-                "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
-                "HAPPYTOKEN_OIDC_ENABLED": "true",
-                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://web.example.com",
-            },
-            clear=False,
-        ),
+        _runtime_config(),
         mock.patch.object(
             auth_oidc_api.oidc_service,
             "handle_callback",
@@ -467,11 +447,7 @@ def test_get_session_ignores_newapi_cookie_fields_from_different_user():
         "enabled": True,
     }
 
-    with mock.patch.dict(
-        os.environ,
-        {"HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret"},
-        clear=False,
-    ):
+    with _runtime_config(oidc={}):
         stale_token = web_session_service.sign_session(
             {
                 "sub": "cookie-user",
@@ -518,15 +494,7 @@ def test_logout_clear_cookie_matches_cross_site_secure_cookie_attributes():
     app = FastAPI()
     app.include_router(auth_oidc_api.create_router())
 
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_API_BASE_URL": "https://api.example.com",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "https://web.example.com",
-            "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
-        },
-        clear=False,
-    ):
+    with _runtime_config(api_public_url="https://api.example.com"):
         response = TestClient(app).post("/api/auth/logout")
 
     assert response.status_code == 200, response.text
@@ -542,14 +510,9 @@ def test_logout_clear_cookie_uses_lax_for_http_test_origin():
     app = FastAPI()
     app.include_router(auth_oidc_api.create_router())
 
-    with mock.patch.dict(
-        os.environ,
-        {
-            "HAPPYTOKEN_API_BASE_URL": "http://101.96.195.224",
-            "HAPPYTOKEN_FRONTEND_BASE_URL": "http://101.96.195.224:3000",
-            "HAPPYTOKEN_SESSION_SECRET": "oidc-session-secret",
-        },
-        clear=False,
+    with _runtime_config(
+        api_public_url="http://101.96.195.224",
+        public_app_url="http://101.96.195.224:3000",
     ):
         response = TestClient(app).post("/api/auth/logout")
 
