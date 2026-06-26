@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import json
+import time
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -19,6 +22,27 @@ def _auth_key_file_lock(path: Path) -> Lock:
             lock = Lock()
             _AUTH_KEY_FILE_LOCKS[key] = lock
         return lock
+
+
+@contextmanager
+def _auth_key_process_lock(path: Path) -> Iterator[None]:
+    lock_path = path.with_name(f"{path.name}.lock")
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            lock_path.mkdir(mode=0o700)
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for auth key lock: {lock_path}")
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        try:
+            lock_path.rmdir()
+        except FileNotFoundError:
+            pass
 
 
 class JSONStorageBackend(StorageBackend):
@@ -88,18 +112,20 @@ class JSONStorageBackend(StorageBackend):
         if not normalized_role:
             return False
         with _auth_key_file_lock(self.auth_keys_path):
-            auth_keys = self.load_auth_keys()
-            if any(key.get("role") == normalized_role for key in auth_keys):
-                return False
-            auth_keys.append(dict(item))
-            self.save_auth_keys(auth_keys)
-            return True
+            with _auth_key_process_lock(self.auth_keys_path):
+                auth_keys = self.load_auth_keys()
+                if any(key.get("role") == normalized_role for key in auth_keys):
+                    return False
+                auth_keys.append(dict(item))
+                self.save_auth_keys(auth_keys)
+                return True
 
     def delete_first_auth_key(
         self, role: str, key_id: str, key_hash: str
     ) -> bool:
         with _auth_key_file_lock(self.auth_keys_path):
-            return super().delete_first_auth_key(role, key_id, key_hash)
+            with _auth_key_process_lock(self.auth_keys_path):
+                return super().delete_first_auth_key(role, key_id, key_hash)
 
     def load_runtime_config(self) -> dict[str, Any]:
         if not self.runtime_config_path.exists():

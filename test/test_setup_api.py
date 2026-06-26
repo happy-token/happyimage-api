@@ -1,4 +1,5 @@
 import concurrent.futures
+import multiprocessing
 import tempfile
 import threading
 import unittest
@@ -6,6 +7,35 @@ from pathlib import Path
 from unittest import mock
 
 from fastapi.testclient import TestClient
+
+
+def _create_first_admin_process_worker(
+    barrier,
+    queue,
+    accounts_path: str,
+    auth_keys_path: str,
+    runtime_config_path: str,
+    candidate: str,
+) -> None:
+    from services.storage.json_storage import JSONStorageBackend
+    from services.auth_service import AuthService
+
+    storage = JSONStorageBackend(
+        Path(accounts_path),
+        Path(auth_keys_path),
+        Path(runtime_config_path),
+    )
+    auth = AuthService(storage)
+    barrier.wait()
+    try:
+        item = auth.create_first_admin_with_value(
+            name=f"Owner {candidate}",
+            key=f"owner-secret-key-{candidate}",
+        )
+    except ValueError as exc:
+        queue.put((False, str(exc)))
+        return
+    queue.put((True, str(item["id"])))
 
 
 class SetupAPITests(unittest.TestCase):
@@ -129,6 +159,54 @@ class SetupAPITests(unittest.TestCase):
         self.assertEqual(len(auth_one.list_keys("admin")), 1)
         self.assertEqual(len(auth_two.list_keys("admin")), 1)
 
+    def test_create_first_admin_is_atomic_across_processes(self) -> None:
+        try:
+            context = multiprocessing.get_context("fork")
+        except ValueError:
+            self.skipTest("fork multiprocessing context is unavailable")
+        accounts_path = self.data_dir / "accounts.json"
+        auth_keys_path = self.data_dir / "auth_keys.json"
+        runtime_config_path = self.data_dir / "runtime_config.json"
+        barrier = context.Barrier(2)
+        queue = context.Queue()
+        processes = [
+            context.Process(
+                target=_create_first_admin_process_worker,
+                args=(
+                    barrier,
+                    queue,
+                    str(accounts_path),
+                    str(auth_keys_path),
+                    str(runtime_config_path),
+                    candidate,
+                ),
+            )
+            for candidate in ("one", "two")
+        ]
+
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=10)
+        for process in processes:
+            if process.is_alive():
+                process.terminate()
+                process.join(timeout=5)
+            self.assertEqual(process.exitcode, 0)
+
+        results = [queue.get(timeout=1) for _ in processes]
+        successes = [result for result in results if result[0]]
+        failures = [result for result in results if not result[0]]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0][1], "初始化已完成")
+        self.assertFalse(
+            auth_keys_path.with_name(f"{auth_keys_path.name}.lock").exists()
+        )
+
+        auth = self.make_auth_service()
+        self.assertEqual(len(auth.list_keys("admin")), 1)
+
     def test_setup_status_open_when_no_admin_exists(self) -> None:
         client = self.make_client()
 
@@ -192,6 +270,23 @@ class SetupAPITests(unittest.TestCase):
             "/api/setup", json={"admin_name": "Other", "admin_key": "second-secret"}
         )
         self.assertEqual(second.status_code, 403)
+
+    def test_setup_post_is_rate_limited(self) -> None:
+        client = self.make_client()
+
+        responses = [
+            client.post(
+                "/api/setup",
+                json={"admin_name": "Owner", "admin_key": "short"},
+                headers={"X-Forwarded-For": f"203.0.113.{index}"},
+            )
+            for index in range(9)
+        ]
+
+        self.assertEqual(
+            [response.status_code for response in responses[:8]], [400] * 8
+        )
+        self.assertEqual(responses[8].status_code, 429)
 
     def test_setup_rolls_back_first_admin_when_config_save_fails(self) -> None:
         client = self.make_client()
@@ -355,6 +450,31 @@ class SetupAPITests(unittest.TestCase):
         settings_response = client.get("/api/settings")
         self.assertEqual(settings_response.status_code, 200)
         self.assertIn("config", settings_response.json())
+
+    def test_admin_key_login_accepts_admin_key_field(self) -> None:
+        client = self.make_client()
+        setup_response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+        self.assertEqual(setup_response.status_code, 200)
+
+        response = client.post(
+            "/api/auth/admin-key-login",
+            json={"admin_key": "owner-secret-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["role"], "admin")
 
     def test_admin_key_login_rejects_invalid_key(self) -> None:
         client = self.make_client()

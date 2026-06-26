@@ -96,6 +96,7 @@ class SetupRequest(BaseModel):
 
 class AdminKeyLoginRequest(BaseModel):
     key: str = ""
+    admin_key: str = ""
 
 
 class UserProfileUpdateRequest(BaseModel):
@@ -494,7 +495,8 @@ def create_router(app_version: str) -> APIRouter:
         return _setup_status_payload()
 
     @router.post("/api/setup")
-    async def complete_setup(body: SetupRequest):
+    async def complete_setup(request: Request, body: SetupRequest):
+        _check_auth_rate_limit(request, "setup", "first_admin")
         if _admin_exists():
             raise HTTPException(status_code=403, detail={"error": "初始化已完成"})
         admin_key = body.admin_key.strip()
@@ -534,7 +536,7 @@ def create_router(app_version: str) -> APIRouter:
     @router.post("/api/auth/admin-key-login")
     async def admin_key_login(request: Request, body: AdminKeyLoginRequest):
         _check_auth_rate_limit(request, "admin_key_login", "admin")
-        key = body.key.strip()
+        key = (body.key or body.admin_key).strip()
         if not key:
             raise HTTPException(status_code=400, detail={"error": "请输入管理员密钥"})
         identity = auth_service.authenticate(key)
