@@ -185,6 +185,61 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertEqual(model_gateway["gateway_api_base_url"], "https://gateway.example.com/v1")
             self.assertEqual(model_gateway["gateway_management_url"], "https://gateway.example.com")
 
+    def test_public_config_redacts_ai_review_api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "ai_review": {
+                            "enabled": True,
+                            "base_url": "https://review.example.com/v1",
+                            "api_key": "review-secret",
+                            "model": "moderation-model",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.config_module.ConfigStore(config_path).get()
+            ai_review = response["ai_review"]
+
+            self.assertNotIn("api_key", ai_review)
+            self.assertTrue(ai_review["api_key_configured"])
+            self.assertEqual(ai_review["base_url"], "https://review.example.com/v1")
+            self.assertEqual(ai_review["model"], "moderation-model")
+
+    def test_public_config_redacts_image_storage_webdav_password(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "image_storage": {
+                            "enabled": True,
+                            "mode": "webdav",
+                            "webdav_url": "https://dav.example.com/",
+                            "webdav_username": "image-user",
+                            "webdav_password": "webdav-secret",
+                            "webdav_root_path": "/images/",
+                            "public_base_url": "https://cdn.example.com/",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.config_module.ConfigStore(config_path).get()
+            image_storage = response["image_storage"]
+
+            self.assertNotIn("webdav_password", image_storage)
+            self.assertTrue(image_storage["webdav_password_configured"])
+            self.assertEqual(image_storage["webdav_url"], "https://dav.example.com")
+            self.assertEqual(image_storage["webdav_username"], "image-user")
+            self.assertEqual(image_storage["webdav_root_path"], "images")
+            self.assertEqual(image_storage["public_base_url"], "https://cdn.example.com")
+
     def test_public_config_does_not_expose_legacy_newapi_binding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "config.json"
@@ -257,6 +312,73 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertNotIn("sql_dsn", response_gateway)
             self.assertTrue(response_gateway["provision_secret_configured"])
             self.assertTrue(response_gateway["sql_dsn_configured"])
+
+    def test_update_preserves_existing_redacted_ai_review_and_image_storage_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "ai_review": {
+                            "enabled": True,
+                            "base_url": "https://old-review.example.com/v1",
+                            "api_key": "stored-review-key",
+                            "model": "old-review-model",
+                        },
+                        "image_storage": {
+                            "enabled": True,
+                            "mode": "webdav",
+                            "webdav_url": "https://old-dav.example.com",
+                            "webdav_username": "old-image-user",
+                            "webdav_password": "stored-webdav-password",
+                            "webdav_root_path": "old-images",
+                            "public_base_url": "https://old-cdn.example.com",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = self.config_module.ConfigStore(config_path)
+            response = store.update(
+                {
+                    "ai_review": {
+                        "enabled": True,
+                        "base_url": "https://new-review.example.com/v1",
+                        "api_key": "",
+                        "api_key_configured": True,
+                        "model": "new-review-model",
+                    },
+                    "image_storage": {
+                        "enabled": True,
+                        "mode": "webdav",
+                        "webdav_url": "https://new-dav.example.com/",
+                        "webdav_username": "new-image-user",
+                        "webdav_password": "",
+                        "webdav_password_configured": True,
+                        "webdav_root_path": "/new-images/",
+                        "public_base_url": "https://new-cdn.example.com/",
+                    },
+                }
+            )
+
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            saved_ai_review = saved["ai_review"]
+            saved_image_storage = saved["image_storage"]
+            response_ai_review = response["ai_review"]
+            response_image_storage = response["image_storage"]
+            self.assertEqual(saved_ai_review["base_url"], "https://new-review.example.com/v1")
+            self.assertEqual(saved_ai_review["api_key"], "stored-review-key")
+            self.assertEqual(saved_ai_review["model"], "new-review-model")
+            self.assertEqual(saved_image_storage["webdav_url"], "https://new-dav.example.com")
+            self.assertEqual(saved_image_storage["webdav_username"], "new-image-user")
+            self.assertEqual(saved_image_storage["webdav_password"], "stored-webdav-password")
+            self.assertEqual(saved_image_storage["webdav_root_path"], "new-images")
+            self.assertEqual(saved_image_storage["public_base_url"], "https://new-cdn.example.com")
+            self.assertNotIn("api_key", response_ai_review)
+            self.assertTrue(response_ai_review["api_key_configured"])
+            self.assertNotIn("webdav_password", response_image_storage)
+            self.assertTrue(response_image_storage["webdav_password_configured"])
 
     def test_config_store_migrates_legacy_file_into_empty_storage_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

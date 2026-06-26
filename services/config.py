@@ -149,6 +149,20 @@ def _redact_model_gateway_secret(settings: dict[str, object]) -> dict[str, objec
     return redacted
 
 
+def _redact_ai_review_secret(settings: dict[str, object]) -> dict[str, object]:
+    redacted = dict(settings)
+    redacted["api_key_configured"] = bool(str(redacted.get("api_key") or "").strip())
+    redacted.pop("api_key", None)
+    return redacted
+
+
+def _redact_image_storage_secret(settings: dict[str, object]) -> dict[str, object]:
+    redacted = dict(settings)
+    redacted["webdav_password_configured"] = bool(str(redacted.get("webdav_password") or "").strip())
+    redacted.pop("webdav_password", None)
+    return redacted
+
+
 def _validate_image_storage_settings(settings: dict[str, object]) -> None:
     if not _normalize_bool(settings.get("enabled"), False):
         return
@@ -427,7 +441,7 @@ class ConfigStore:
         data["image_parallel_generation"] = self.image_parallel_generation
         data["log_levels"] = self.log_levels
         data["sensitive_words"] = self.sensitive_words
-        data["ai_review"] = self.ai_review
+        data["ai_review"] = _redact_ai_review_secret(self.ai_review)
         data["global_system_prompt"] = self.global_system_prompt
         data["public_app_url"] = self.public_app_url
         data["api_public_url"] = self.api_public_url
@@ -440,7 +454,7 @@ class ConfigStore:
         data["session_cookie_domain"] = self.session_cookie_domain
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
-        data["image_storage"] = self.get_image_storage_settings()
+        data["image_storage"] = _redact_image_storage_secret(self.get_image_storage_settings())
         data["model_gateway"] = _redact_model_gateway_secret(self.get_model_gateway_settings())
         data.pop("auth-key", None)
         data.pop("session_secret", None)
@@ -466,8 +480,19 @@ class ConfigStore:
         next_data = dict(self.data)
         next_data.update(dict(data or {}))
         if "image_storage" in next_data:
-            next_data["image_storage"] = _normalize_image_storage_settings(next_data.get("image_storage"))
+            normalized_image_storage = _normalize_image_storage_settings(next_data.get("image_storage"))
+            if not str(normalized_image_storage.get("webdav_password") or "").strip():
+                normalized_image_storage["webdav_password"] = self.get_image_storage_settings().get("webdav_password", "")
+            next_data["image_storage"] = normalized_image_storage
             _validate_image_storage_settings(next_data["image_storage"])
+        if "ai_review" in next_data:
+            incoming_ai_review = next_data.get("ai_review")
+            if isinstance(incoming_ai_review, dict):
+                normalized_ai_review = dict(incoming_ai_review)
+                normalized_ai_review.pop("api_key_configured", None)
+                if not str(normalized_ai_review.get("api_key") or "").strip():
+                    normalized_ai_review["api_key"] = str(self.ai_review.get("api_key") or "").strip()
+                next_data["ai_review"] = normalized_ai_review
         if "oidc" in next_data:
             incoming_oidc = next_data.get("oidc")
             if isinstance(incoming_oidc, dict):
