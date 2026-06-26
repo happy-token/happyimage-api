@@ -17,6 +17,20 @@ WEB_STATIC_CACHE_CONTROL = "public, max-age=3600, stale-while-revalidate=86400"
 WEB_APP_ASSET_CACHE_CONTROL = "no-cache"
 
 
+def is_removed_v1_path(path: str) -> bool:
+    return path == "/v1" or path.startswith("/v1/")
+
+
+def add_common_security_headers(response, request) -> None:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    if proto == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+
 def web_asset_cache_headers(path: str) -> dict[str, str]:
     clean_path = path.strip("/")
     if clean_path.startswith("_next/static/"):
@@ -47,20 +61,10 @@ def create_app() -> FastAPI:
     async def add_security_headers(request, call_next):
         request_token = set_current_request(request)
         try:
-            path = request.url.path
-            if path == "/v1" or path.startswith("/v1/"):
-                response = JSONResponse(status_code=404, content={"detail": "Not Found"})
-            else:
-                response = await call_next(request)
+            response = await call_next(request)
         finally:
             reset_current_request(request_token)
-        response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        response.headers.setdefault("X-Frame-Options", "DENY")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        if proto == "https":
-            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        add_common_security_headers(response, request)
         return response
 
     # CORS: support credentials for configured frontend origins.
@@ -82,6 +86,19 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
+
+    @app.middleware("http")
+    async def block_removed_v1_routes(request, call_next):
+        if not is_removed_v1_path(request.url.path):
+            return await call_next(request)
+        request_token = set_current_request(request)
+        try:
+            response = JSONResponse(status_code=404, content={"detail": "Not Found"})
+        finally:
+            reset_current_request(request_token)
+        add_common_security_headers(response, request)
+        return response
+
     app.include_router(auth_oidc.create_router())
     app.include_router(image_conversations.create_router())
     app.include_router(image_tasks.create_router())
