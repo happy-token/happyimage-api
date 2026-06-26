@@ -155,17 +155,7 @@ class GitStorageBackend(StorageBackend):
                 if repo.is_dirty():
                     repo.index.commit("Create first auth key")
                 try:
-                    push_results = repo.remote("origin").push(self.branch)
-                    if any(
-                        result.flags
-                        & (
-                            result.ERROR
-                            | result.REJECTED
-                            | result.REMOTE_REJECTED
-                        )
-                        for result in push_results
-                    ):
-                        raise GitCommandError("git push", "push rejected")
+                    self._push_or_raise(repo)
                     return True
                 except GitCommandError:
                     try:
@@ -231,7 +221,20 @@ class GitStorageBackend(StorageBackend):
         repo.index.add([file_path])
         if repo.is_dirty():
             repo.index.commit(message)
-            repo.remote("origin").push(self.branch)
+            self._push_or_raise(repo)
+
+    def _push_or_raise(self, repo: Repo) -> None:
+        push_results = repo.remote("origin").push(self.branch)
+        if any(
+            result.flags
+            & (
+                result.ERROR
+                | result.REJECTED
+                | result.REMOTE_REJECTED
+            )
+            for result in push_results
+        ):
+            raise GitCommandError("git push", "push rejected")
 
     def health_check(self) -> dict[str, Any]:
         """健康检查"""

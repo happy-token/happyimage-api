@@ -381,11 +381,14 @@ def _normalize_setup_config(body: SetupRequest) -> dict[str, object]:
     ):
         if key in model_gateway:
             model_gateway[key] = _normalize_setup_url(model_gateway.get(key), label)
+    oidc = dict(body.oidc) if isinstance(body.oidc, dict) else {}
+    if "issuer" in oidc:
+        oidc["issuer"] = _normalize_setup_url(oidc.get("issuer"), "OIDC Issuer")
     return {
         "public_app_url": public_app_url,
         "api_public_url": api_public_url,
         "session_secret": session_secret,
-        "oidc": body.oidc,
+        "oidc": oidc,
         "model_gateway": model_gateway,
     }
 

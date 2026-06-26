@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 import json
+import os
 import time
 from pathlib import Path
 from threading import Lock
@@ -140,10 +141,21 @@ class JSONStorageBackend(StorageBackend):
 
     def save_runtime_config(self, config: dict[str, Any]) -> None:
         self.runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
-        self.runtime_config_path.write_text(
-            json.dumps(config, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        payload = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
+        temp_path = self.runtime_config_path.with_name(
+            f".{self.runtime_config_path.name}.tmp-{os.getpid()}-{time.monotonic_ns()}"
         )
+        try:
+            with temp_path.open("w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, self.runtime_config_path)
+        finally:
+            try:
+                temp_path.unlink()
+            except FileNotFoundError:
+                pass
 
     def health_check(self) -> dict[str, Any]:
         """健康检查"""

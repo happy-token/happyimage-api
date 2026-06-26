@@ -450,6 +450,27 @@ class SetupAPITests(unittest.TestCase):
         self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
         self.assertEqual(self.test_auth.list_keys("admin"), [])
 
+    def test_setup_rejects_bare_oidc_issuer_scheme(self) -> None:
+        client = self.make_client()
+
+        response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": True, "issuer": "https://"},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+
     def test_setup_rejects_invalid_gateway_url(self) -> None:
         client = self.make_client()
 

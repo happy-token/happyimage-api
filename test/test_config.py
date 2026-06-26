@@ -1,7 +1,9 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -165,6 +167,47 @@ class ConfigLoadingTests(unittest.TestCase):
 
         self.assertEqual(store.data, {"public_app_url": "https://old.example.com"})
         self.assertEqual(store.public_app_url, "https://old.example.com")
+
+    def test_update_rejects_bare_oidc_issuer_scheme(self) -> None:
+        class MemoryStorage:
+            def __init__(self) -> None:
+                self.runtime_config: dict[str, object] = {}
+
+            def load_accounts(self) -> list[dict[str, object]]:
+                return []
+
+            def save_accounts(self, accounts: list[dict[str, object]]) -> None:
+                pass
+
+            def load_auth_keys(self) -> list[dict[str, object]]:
+                return []
+
+            def save_auth_keys(self, auth_keys: list[dict[str, object]]) -> None:
+                pass
+
+            def load_runtime_config(self) -> dict[str, object]:
+                return dict(self.runtime_config)
+
+            def runtime_config_exists(self) -> bool:
+                return bool(self.runtime_config)
+
+            def save_runtime_config(self, config: dict[str, object]) -> None:
+                self.runtime_config = dict(config)
+
+            def health_check(self) -> dict[str, object]:
+                return {"status": "healthy"}
+
+            def get_backend_info(self) -> dict[str, object]:
+                return {"type": "memory"}
+
+        store = self.config_module.ConfigStore(
+            Path("ignored-config.json"), storage_backend=MemoryStorage()
+        )
+
+        with self.assertRaises(ValueError):
+            store.update({"oidc": {"enabled": True, "issuer": "https://"}})
+
+        self.assertEqual(store.get_oidc_settings()["issuer"], "")
 
     def test_legacy_base_url_is_api_public_url_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -532,6 +575,98 @@ class ConfigLoadingTests(unittest.TestCase):
             reloaded = self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=reloaded_backend)
 
             self.assertEqual(reloaded.public_app_url, "https://json.example.com")
+
+    def test_json_runtime_config_save_failure_does_not_corrupt_existing_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            from services.storage.json_storage import JSONStorageBackend
+            import services.storage.json_storage as json_storage_module
+
+            runtime_config_path = tmp_path / "runtime_config.json"
+            backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                runtime_config_path,
+            )
+            backend.save_runtime_config({"public_app_url": "https://old.example.com"})
+
+            with mock.patch.object(
+                json_storage_module.os,
+                "replace",
+                side_effect=OSError("replace failed"),
+            ):
+                with self.assertRaises(OSError):
+                    backend.save_runtime_config(
+                        {"public_app_url": "https://new.example.com"}
+                    )
+
+            self.assertEqual(
+                json.loads(runtime_config_path.read_text(encoding="utf-8")),
+                {"public_app_url": "https://old.example.com"},
+            )
+
+    def test_git_runtime_config_push_rejection_raises_and_rolls_back_store(self) -> None:
+        try:
+            from git import Repo
+            from git.exc import GitCommandError
+            from services.storage.git_storage import GitStorageBackend
+        except ImportError as exc:
+            self.skipTest(f"git storage dependencies unavailable: {exc}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            try:
+                old_cwd = os.getcwd()
+            except FileNotFoundError:
+                old_cwd = str(ROOT_DIR)
+            os.chdir(ROOT_DIR)
+            tmp_path = Path(tmp_dir)
+            remote_path = tmp_path / "remote.git"
+            seed_path = tmp_path / "seed"
+            try:
+                Repo.init(remote_path, bare=True)
+                seed_repo = Repo.clone_from(str(remote_path), seed_path)
+                (seed_path / "runtime_config.json").write_text(
+                    json.dumps({"public_app_url": "https://old.example.com"}) + "\n",
+                    encoding="utf-8",
+                )
+                seed_repo.index.add(["runtime_config.json"])
+
+                git_env = {
+                    "GIT_AUTHOR_NAME": "HappyImage Tests",
+                    "GIT_AUTHOR_EMAIL": "tests@example.com",
+                    "GIT_COMMITTER_NAME": "HappyImage Tests",
+                    "GIT_COMMITTER_EMAIL": "tests@example.com",
+                }
+                with mock.patch.dict(os.environ, git_env, clear=False):
+                    seed_repo.index.commit("Seed runtime config")
+                    seed_repo.git.branch("-M", "main")
+                    seed_repo.remote("origin").push("main")
+
+                    backend = GitStorageBackend(
+                        str(remote_path),
+                        "",
+                        branch="main",
+                        local_cache_dir=tmp_path / "cache",
+                    )
+                    store = self.config_module.ConfigStore(
+                        tmp_path / "config.json", storage_backend=backend
+                    )
+
+                    with mock.patch.object(
+                        backend,
+                        "_push_or_raise",
+                        side_effect=GitCommandError("git push", "rejected"),
+                    ):
+                        with self.assertRaises(GitCommandError):
+                            store.update({"public_app_url": "https://new.example.com"})
+            finally:
+                os.chdir(old_cwd if Path(old_cwd).exists() else ROOT_DIR)
+
+            self.assertEqual(store.public_app_url, "https://old.example.com")
+            self.assertEqual(
+                store.data, {"public_app_url": "https://old.example.com"}
+            )
 
     def test_config_store_uses_database_storage_backend_for_runtime_settings(self) -> None:
         try:

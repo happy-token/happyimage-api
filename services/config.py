@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 import time
+from urllib.parse import urlsplit
 
 from services.storage.base import StorageBackend
 
@@ -76,6 +77,17 @@ def _normalize_url(value: object) -> str:
     return str(value or "").strip().rstrip("/")
 
 
+def _normalize_http_url(value: object, label: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.rstrip("/")
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{label} 必须以 http:// 或 https:// 开头")
+    return normalized
+
+
 def _normalize_gateway_api_url(value: object) -> str:
     base = _normalize_url(value)
     if not base:
@@ -120,7 +132,7 @@ def _normalize_oidc_settings(value: object) -> dict[str, object]:
     source = value if isinstance(value, dict) else {}
     return {
         "enabled": _normalize_bool(source.get("enabled"), False),
-        "issuer": str(source.get("issuer") or "").strip().rstrip("/"),
+        "issuer": _normalize_http_url(source.get("issuer"), "OIDC Issuer"),
         "client_id": str(source.get("client_id") or "").strip(),
         "client_secret": str(source.get("client_secret") or "").strip(),
         "scopes": str(source.get("scopes") or "openid profile email").strip(),
