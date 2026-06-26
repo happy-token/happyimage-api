@@ -241,9 +241,7 @@ _AUTH_ATTEMPT_LIMIT = 8
 
 def _rate_limit_key(request: Request, scope: str, subject: str = "") -> str:
     host = request.client.host if request.client else "unknown"
-    forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
-    ip = forwarded or host
-    return f"{scope}:{ip}:{subject.strip().lower()}"
+    return f"{scope}:{host}:{subject.strip().lower()}"
 
 
 def _check_auth_rate_limit(request: Request, scope: str, subject: str = "") -> None:
@@ -339,23 +337,52 @@ def _setup_status_payload() -> dict[str, object]:
         "setup_required": setup_required,
     }
     if setup_required:
-        payload["storage"] = config.get_storage_backend().get_backend_info()
+        payload["storage"] = _public_setup_storage_info()
     return payload
 
 
+def _public_setup_storage_info() -> dict[str, object]:
+    info = config.get_storage_backend().get_backend_info()
+    return {
+        "type": str(info.get("type") or "unknown"),
+        "description": str(info.get("description") or ""),
+        "status": "configured",
+    }
+
+
+def _normalize_setup_url(value: object, label: str, *, required: bool = False) -> str:
+    normalized = str(value or "").strip().rstrip("/")
+    if not normalized:
+        if required:
+            raise ValueError(f"{label} 必须填写")
+        return ""
+    if len(normalized) > 512:
+        raise ValueError(f"{label} 不能超过 512 个字符")
+    if not normalized.startswith(("http://", "https://")):
+        raise ValueError(f"{label} 必须以 http:// 或 https:// 开头")
+    return normalized
+
+
 def _normalize_setup_config(body: SetupRequest) -> dict[str, object]:
-    public_app_url = body.public_app_url.strip().rstrip("/")
-    if public_app_url and not public_app_url.startswith(("http://", "https://")):
-        raise ValueError("公开应用地址必须以 http:// 或 https:// 开头")
+    public_app_url = _normalize_setup_url(body.public_app_url, "公开应用地址")
+    api_public_url = _normalize_setup_url(body.api_public_url, "公开 API 地址")
     session_secret = body.session_secret.strip()
     if len(session_secret) < 32:
         raise ValueError("Session Secret 至少需要 32 个字符")
+    model_gateway = dict(body.model_gateway) if isinstance(body.model_gateway, dict) else {}
+    for key, label in (
+        ("gateway_api_base_url", "模型网关 API 地址"),
+        ("gateway_management_url", "模型网关管理地址"),
+        ("provision_url", "模型网关开通地址"),
+    ):
+        if key in model_gateway:
+            model_gateway[key] = _normalize_setup_url(model_gateway.get(key), label)
     return {
         "public_app_url": public_app_url,
-        "api_public_url": body.api_public_url.strip().rstrip("/"),
+        "api_public_url": api_public_url,
         "session_secret": session_secret,
         "oidc": body.oidc,
-        "model_gateway": body.model_gateway,
+        "model_gateway": model_gateway,
     }
 
 

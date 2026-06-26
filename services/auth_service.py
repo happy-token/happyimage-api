@@ -423,8 +423,10 @@ class AuthService:
                 "created_at": _now_iso(),
                 "last_used_at": None,
             }
-            self._items.append(item)
-            self._save()
+            if not self.storage.create_first_auth_key("admin", item):
+                self._reload_locked()
+                raise ValueError("初始化已完成")
+            self._reload_locked()
             return self._public_item(item)
 
     def delete_first_admin_if_key_matches(self, key_id: str, raw_key: str) -> bool:
@@ -434,23 +436,11 @@ class AuthService:
             return False
         candidate_hash = _hash_key(candidate)
         with self._lock:
+            removed = self.storage.delete_first_auth_key(
+                "admin", normalized_id, candidate_hash
+            )
             self._reload_locked()
-            for index, item in enumerate(self._items):
-                if item.get("id") != normalized_id or item.get("role") != "admin":
-                    continue
-                if not hmac.compare_digest(
-                    self._clean(item.get("key_hash")), candidate_hash
-                ):
-                    return False
-                remaining_items = self._items[:index] + self._items[index + 1 :]
-                if any(
-                    next_item.get("role") == "admin" for next_item in remaining_items
-                ):
-                    return False
-                self._items = remaining_items
-                self._save()
-                return True
-        return False
+            return removed
 
     def update_key(
         self,

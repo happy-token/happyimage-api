@@ -34,6 +34,7 @@ class SetupAPITests(unittest.TestCase):
         test_auth = AuthService(storage)
         self.test_config = test_config
         self.test_auth = test_auth
+        system_module._AUTH_ATTEMPTS.clear()
 
         patches = [
             mock.patch.object(config_module, "config", test_config),
@@ -84,6 +85,50 @@ class SetupAPITests(unittest.TestCase):
         self.assertEqual(failures[0][1], "初始化已完成")
         self.assertEqual(len(auth.list_keys("admin")), 1)
 
+    def test_create_first_admin_is_atomic_across_auth_service_instances(self) -> None:
+        from services.storage.json_storage import JSONStorageBackend
+        from services.auth_service import AuthService
+
+        storage_one = JSONStorageBackend(
+            self.data_dir / "accounts.json",
+            self.data_dir / "auth_keys.json",
+            self.data_dir / "runtime_config.json",
+        )
+        storage_two = JSONStorageBackend(
+            self.data_dir / "accounts.json",
+            self.data_dir / "auth_keys.json",
+            self.data_dir / "runtime_config.json",
+        )
+        auth_one = AuthService(storage_one)
+        auth_two = AuthService(storage_two)
+        ready = threading.Barrier(2)
+
+        def create(auth: AuthService, candidate: str) -> tuple[bool, str]:
+            ready.wait()
+            try:
+                item = auth.create_first_admin_with_value(
+                    name=f"Owner {candidate}",
+                    key=f"owner-secret-key-{candidate}",
+                )
+            except ValueError as exc:
+                return False, str(exc)
+            return True, str(item["id"])
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(create, auth_one, "one"),
+                executor.submit(create, auth_two, "two"),
+            ]
+            results = [future.result() for future in futures]
+
+        successes = [result for result in results if result[0]]
+        failures = [result for result in results if not result[0]]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0][1], "初始化已完成")
+        self.assertEqual(len(auth_one.list_keys("admin")), 1)
+        self.assertEqual(len(auth_two.list_keys("admin")), 1)
+
     def test_setup_status_open_when_no_admin_exists(self) -> None:
         client = self.make_client()
 
@@ -92,6 +137,17 @@ class SetupAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["setup_required"], True)
         self.assertIn("storage", response.json())
+        storage = response.json()["storage"]
+        self.assertEqual(storage["type"], "json")
+        for key in (
+            "file_path",
+            "auth_keys_file_path",
+            "runtime_config_file_path",
+            "database_url",
+            "repo_url",
+        ):
+            self.assertNotIn(key, storage)
+        self.assertNotIn(str(self.data_dir), str(storage))
 
     def test_setup_creates_first_admin_and_settings(self) -> None:
         client = self.make_client()
@@ -163,6 +219,49 @@ class SetupAPITests(unittest.TestCase):
         self.assertEqual(status.status_code, 200)
         self.assertEqual(status.json()["setup_required"], True)
 
+    def test_setup_rejects_invalid_api_public_url(self) -> None:
+        client = self.make_client()
+
+        response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "api_public_url": "ftp://api.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+
+    def test_setup_rejects_invalid_gateway_url(self) -> None:
+        client = self.make_client()
+
+        response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "javascript:alert(1)",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+
     def test_admin_key_login_works_when_oidc_is_unavailable(self) -> None:
         client = self.make_client(base_url="https://image.example.com")
         client.post(
@@ -216,6 +315,37 @@ class SetupAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["detail"]["error"], "管理员密钥无效")
+
+    def test_admin_key_login_rate_limit_ignores_x_forwarded_for(self) -> None:
+        client = self.make_client()
+        setup_response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+        self.assertEqual(setup_response.status_code, 200)
+
+        responses = [
+            client.post(
+                "/api/auth/admin-key-login",
+                json={"key": "wrong-key"},
+                headers={"X-Forwarded-For": f"203.0.113.{index}"},
+            )
+            for index in range(9)
+        ]
+
+        self.assertEqual(
+            [response.status_code for response in responses[:8]], [401] * 8
+        )
+        self.assertEqual(responses[8].status_code, 429)
 
 
 if __name__ == "__main__":

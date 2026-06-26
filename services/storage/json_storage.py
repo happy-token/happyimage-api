@@ -2,9 +2,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from services.storage.base import StorageBackend
+
+_AUTH_KEY_FILE_LOCKS: dict[str, Lock] = {}
+_AUTH_KEY_FILE_LOCKS_GUARD = Lock()
+
+
+def _auth_key_file_lock(path: Path) -> Lock:
+    key = str(path.resolve())
+    with _AUTH_KEY_FILE_LOCKS_GUARD:
+        lock = _AUTH_KEY_FILE_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _AUTH_KEY_FILE_LOCKS[key] = lock
+        return lock
 
 
 class JSONStorageBackend(StorageBackend):
@@ -68,6 +82,24 @@ class JSONStorageBackend(StorageBackend):
             json.dumps({"items": auth_keys}, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
+
+    def create_first_auth_key(self, role: str, item: dict[str, Any]) -> bool:
+        normalized_role = str(role or "").strip()
+        if not normalized_role:
+            return False
+        with _auth_key_file_lock(self.auth_keys_path):
+            auth_keys = self.load_auth_keys()
+            if any(key.get("role") == normalized_role for key in auth_keys):
+                return False
+            auth_keys.append(dict(item))
+            self.save_auth_keys(auth_keys)
+            return True
+
+    def delete_first_auth_key(
+        self, role: str, key_id: str, key_hash: str
+    ) -> bool:
+        with _auth_key_file_lock(self.auth_keys_path):
+            return super().delete_first_auth_key(role, key_id, key_hash)
 
     def load_runtime_config(self) -> dict[str, Any]:
         if not self.runtime_config_path.exists():

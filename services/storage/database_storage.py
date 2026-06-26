@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from sqlalchemy import Column, String, Text, create_engine, Integer, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -36,6 +37,14 @@ class RuntimeConfigModel(Base):
 
     key = Column(String(255), primary_key=True)
     data = Column(Text, nullable=False)
+
+
+class FirstAuthRoleModel(Base):
+    """Role claim used for atomic first auth-key creation."""
+    __tablename__ = "first_auth_roles"
+
+    role = Column(String(64), primary_key=True)
+    key_id = Column(String(255), nullable=False)
 
 
 class DatabaseStorageBackend(StorageBackend):
@@ -78,6 +87,76 @@ class DatabaseStorageBackend(StorageBackend):
     def save_auth_keys(self, auth_keys: list[dict[str, Any]]) -> None:
         """保存鉴权密钥数据到数据库"""
         self._save_rows(AuthKeyModel, auth_keys, "id", "key_id")
+
+    def create_first_auth_key(self, role: str, item: dict[str, Any]) -> bool:
+        normalized_role = str(role or "").strip()
+        key_id = str(item.get("id") or "").strip()
+        if not normalized_role or not key_id:
+            return False
+        session = self.Session()
+        try:
+            for row in session.query(AuthKeyModel).all():
+                try:
+                    data = json.loads(row.data)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(data, dict) and data.get("role") == normalized_role:
+                    return False
+            if session.query(FirstAuthRoleModel).filter_by(role=normalized_role).first():
+                return False
+            session.add(FirstAuthRoleModel(role=normalized_role, key_id=key_id))
+            session.add(
+                AuthKeyModel(
+                    key_id=key_id,
+                    data=json.dumps(dict(item), ensure_ascii=False),
+                )
+            )
+            session.commit()
+            return True
+        except IntegrityError:
+            session.rollback()
+            return False
+        except Exception as exc:
+            session.rollback()
+            raise exc
+        finally:
+            session.close()
+
+    def delete_first_auth_key(
+        self, role: str, key_id: str, key_hash: str
+    ) -> bool:
+        normalized_role = str(role or "").strip()
+        normalized_id = str(key_id or "").strip()
+        normalized_hash = str(key_hash or "").strip()
+        if not normalized_role or not normalized_id or not normalized_hash:
+            return False
+        session = self.Session()
+        try:
+            row = session.query(AuthKeyModel).filter_by(key_id=normalized_id).first()
+            claim = (
+                session.query(FirstAuthRoleModel)
+                .filter_by(role=normalized_role, key_id=normalized_id)
+                .first()
+            )
+            if row is None or claim is None:
+                return False
+            data = json.loads(row.data)
+            if not isinstance(data, dict):
+                return False
+            if (
+                data.get("role") != normalized_role
+                or data.get("key_hash") != normalized_hash
+            ):
+                return False
+            session.delete(row)
+            session.delete(claim)
+            session.commit()
+            return True
+        except Exception as exc:
+            session.rollback()
+            raise exc
+        finally:
+            session.close()
 
     def load_runtime_config(self) -> dict[str, Any]:
         session = self.Session()

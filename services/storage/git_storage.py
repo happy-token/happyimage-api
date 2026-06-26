@@ -4,12 +4,26 @@ import json
 import shutil
 import tempfile
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 from git import Repo
 from git.exc import GitCommandError
 
 from services.storage.base import StorageBackend
+
+_AUTH_KEY_REPO_LOCKS: dict[str, Lock] = {}
+_AUTH_KEY_REPO_LOCKS_GUARD = Lock()
+
+
+def _auth_key_repo_lock(cache_dir: Path, file_path: str) -> Lock:
+    key = f"{cache_dir.resolve()}:{file_path}"
+    with _AUTH_KEY_REPO_LOCKS_GUARD:
+        lock = _AUTH_KEY_REPO_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _AUTH_KEY_REPO_LOCKS[key] = lock
+        return lock
 
 
 class GitStorageBackend(StorageBackend):
@@ -118,6 +132,24 @@ class GitStorageBackend(StorageBackend):
         except Exception as e:
             print(f"[git-storage] save failed: {e}")
             raise e
+
+    def create_first_auth_key(self, role: str, item: dict[str, Any]) -> bool:
+        normalized_role = str(role or "").strip()
+        if not normalized_role:
+            return False
+        with _auth_key_repo_lock(self.local_cache_dir, self.auth_keys_file_path):
+            auth_keys = self.load_auth_keys()
+            if any(key.get("role") == normalized_role for key in auth_keys):
+                return False
+            auth_keys.append(dict(item))
+            self.save_auth_keys(auth_keys)
+            return True
+
+    def delete_first_auth_key(
+        self, role: str, key_id: str, key_hash: str
+    ) -> bool:
+        with _auth_key_repo_lock(self.local_cache_dir, self.auth_keys_file_path):
+            return super().delete_first_auth_key(role, key_id, key_hash)
 
     def load_runtime_config(self) -> dict[str, Any]:
         data = self._load_json_value(self.runtime_config_file_path)
