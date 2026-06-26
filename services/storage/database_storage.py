@@ -92,6 +92,13 @@ class DatabaseStorageBackend(StorageBackend):
         finally:
             session.close()
 
+    def runtime_config_exists(self) -> bool:
+        session = self.Session()
+        try:
+            return session.query(RuntimeConfigModel).filter_by(key="default").first() is not None
+        finally:
+            session.close()
+
     def save_runtime_config(self, config: dict[str, Any]) -> None:
         session = self.Session()
         try:

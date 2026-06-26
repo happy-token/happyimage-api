@@ -33,6 +33,11 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    def runtime_config_exists(self) -> bool:
+        """Return whether admin-managed runtime configuration has been persisted."""
+        pass
+
+    @abstractmethod
     def save_runtime_config(self, config: dict[str, Any]) -> None:
         """Persist admin-managed runtime configuration."""
         pass

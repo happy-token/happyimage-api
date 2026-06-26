@@ -191,9 +191,8 @@ class ConfigStore:
 
     def _load(self) -> dict[str, object]:
         if self._storage_backend is not None:
-            data = self._storage_backend.load_runtime_config()
-            if data:
-                return data
+            if self._storage_backend.runtime_config_exists():
+                return self._storage_backend.load_runtime_config()
             legacy_data = self._load_legacy_file()
             if legacy_data:
                 self._storage_backend.save_runtime_config(legacy_data)
@@ -490,7 +489,14 @@ class ConfigStore:
         return _normalize_oidc_settings(self.data.get("oidc"))
 
     def get_model_gateway_settings(self) -> dict[str, object]:
-        source = self.data.get("model_gateway") if isinstance(self.data.get("model_gateway"), dict) else {}
+        model_gateway = self.data.get("model_gateway")
+        legacy_binding = self.data.get("newapi_binding")
+        if isinstance(model_gateway, dict):
+            source = model_gateway
+        elif isinstance(legacy_binding, dict):
+            source = legacy_binding
+        else:
+            source = {}
         api_url = _normalize_gateway_api_url(
             source.get("gateway_api_base_url")
             or source.get("base_url")

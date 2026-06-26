@@ -91,6 +91,9 @@ class ConfigLoadingTests(unittest.TestCase):
             def load_runtime_config(self) -> dict[str, object]:
                 return dict(self.runtime_config)
 
+            def runtime_config_exists(self) -> bool:
+                return bool(self.runtime_config)
+
             def save_runtime_config(self, config: dict[str, object]) -> None:
                 self.runtime_config = dict(config)
 
@@ -119,6 +122,40 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(response["model_gateway"]["gateway_api_base_url"], "https://gateway.happy-token.cn/v1")
         self.assertEqual(response["model_gateway"]["gateway_management_url"], "https://gateway.happy-token.cn")
 
+    def test_legacy_newapi_binding_settings_are_model_gateway_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "newapi_binding": {
+                            "base_url": "https://legacy-gateway.example.com/",
+                            "management_url": "https://legacy-admin.example.com/",
+                            "provision_url": "https://legacy-provision.example.com",
+                            "provision_secret": "legacy-secret",
+                            "sql_dsn": "sqlite:///legacy.db",
+                            "token_name": "Legacy Token",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = self.config_module.ConfigStore(config_path)
+            settings = store.get_model_gateway_settings()
+
+            self.assertEqual(settings["gateway_api_base_url"], "https://legacy-gateway.example.com/v1")
+            self.assertEqual(settings["gateway_management_url"], "https://legacy-admin.example.com")
+            self.assertEqual(settings["base_url"], "https://legacy-gateway.example.com/v1")
+            self.assertEqual(settings["management_url"], "https://legacy-admin.example.com")
+            self.assertEqual(settings["provision_url"], "https://legacy-provision.example.com")
+            self.assertEqual(settings["provision_secret"], "legacy-secret")
+            self.assertTrue(settings["provision_secret_configured"])
+            self.assertEqual(settings["sql_dsn"], "sqlite:///legacy.db")
+            self.assertTrue(settings["sql_dsn_configured"])
+            self.assertEqual(settings["token_name"], "Legacy Token")
+            self.assertTrue(settings["enabled"])
+
     def test_config_store_migrates_legacy_file_into_empty_storage_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -143,6 +180,36 @@ class ConfigLoadingTests(unittest.TestCase):
                 json.loads(runtime_config_path.read_text(encoding="utf-8")),
                 {"public_app_url": "https://legacy.example.com/"},
             )
+
+    def test_empty_runtime_config_does_not_resurrect_legacy_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            config_path = tmp_path / "config.json"
+            runtime_config_path = tmp_path / "runtime_config.json"
+            config_path.write_text(
+                json.dumps({"public_app_url": "https://legacy.example.com/"}),
+                encoding="utf-8",
+            )
+
+            from services.storage.json_storage import JSONStorageBackend
+
+            backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                runtime_config_path,
+            )
+            backend.save_runtime_config({})
+
+            reloaded_backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                runtime_config_path,
+            )
+            store = self.config_module.ConfigStore(config_path, storage_backend=reloaded_backend)
+
+            self.assertEqual(store.data, {})
+            self.assertEqual(store.public_app_url, "")
+            self.assertEqual(json.loads(runtime_config_path.read_text(encoding="utf-8")), {})
 
     def test_config_store_uses_json_storage_backend_for_runtime_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:

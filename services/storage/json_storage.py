@@ -78,6 +78,9 @@ class JSONStorageBackend(StorageBackend):
             return {}
         return data if isinstance(data, dict) else {}
 
+    def runtime_config_exists(self) -> bool:
+        return self.runtime_config_path.exists()
+
     def save_runtime_config(self, config: dict[str, Any]) -> None:
         self.runtime_config_path.parent.mkdir(parents=True, exist_ok=True)
         self.runtime_config_path.write_text(
