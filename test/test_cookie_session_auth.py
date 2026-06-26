@@ -6,6 +6,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
+import api.system as system_api
 from api.app import create_app
 from services.auth_service import auth_service
 from services.config import config
@@ -54,6 +55,25 @@ def test_password_login_disabled_by_default_returns_unified_login_error():
                 assert response.json()["detail"]["error"] == "请使用统一登录入口"
 
 
+def test_local_password_login_ignores_env_and_uses_config_switch():
+    name, password = _create_password_account(role="admin", prefix="env-disabled-login")
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED": "true"},
+            clear=False,
+        ),
+        _runtime_config(local_password_login_enabled=False),
+    ):
+        with TestClient(create_app()) as client:
+            response = client.post(
+                "/api/auth/login", json={"email": name, "password": password}
+            )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["detail"]["error"] == "请使用统一登录入口"
+
+
 def test_password_login_can_be_enabled_for_emergency_ops():
     with _runtime_config():
         with TestClient(create_app()) as client:
@@ -82,6 +102,28 @@ def test_register_disabled_even_when_registration_enabled():
 
             assert response.status_code == 403, response.text
             assert response.json()["detail"]["error"] == "注册请使用统一登录入口"
+
+
+def test_registration_switch_ignores_env_and_uses_config_value():
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HAPPYTOKEN_REGISTRATION_ENABLED": "true"},
+            clear=False,
+        ),
+        mock.patch.dict(config.data, {"registration_enabled": False}, clear=False),
+    ):
+        assert system_api._registration_enabled() is False
+
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HAPPYTOKEN_REGISTRATION_ENABLED": "false"},
+            clear=False,
+        ),
+        mock.patch.dict(config.data, {"registration_enabled": True}, clear=False),
+    ):
+        assert system_api._registration_enabled() is True
 
 
 def test_password_login_sets_cookie_and_cookie_authenticates_admin_api():
@@ -301,8 +343,8 @@ def test_admin_profile_can_sync_preferences_without_provider_fields():
 
 def test_test_user_password_login_is_case_insensitive():
     with (
-        mock.patch.dict(os.environ, {"HAPPYTOKEN_TEST_ACCOUNTS_ENABLED": "true"}, clear=False),
-        _runtime_config(),
+        mock.patch.dict(os.environ, {"HAPPYTOKEN_TEST_ACCOUNTS_ENABLED": "false"}, clear=False),
+        _runtime_config(test_accounts_enabled=True),
     ):
         fake_identity = {"id": "user", "name": "user", "role": "user"}
         with mock.patch(
@@ -315,6 +357,25 @@ def test_test_user_password_login_is_case_insensitive():
 
                 assert response.status_code == 200, response.text
                 assert response.json()["role"] == "user"
+
+
+def test_test_user_password_login_ignores_env_when_config_disabled():
+    with (
+        mock.patch.dict(
+            os.environ,
+            {"HAPPYTOKEN_TEST_ACCOUNTS_ENABLED": "true"},
+            clear=False,
+        ),
+        _runtime_config(test_accounts_enabled=False),
+    ):
+        with mock.patch("api.support.auth_service.authenticate", return_value=None):
+            with TestClient(create_app()) as client:
+                response = client.post(
+                    "/api/auth/login", json={"email": "User", "password": "User"}
+                )
+
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"]["error"] == "账号或密码不正确"
 
 
 def test_local_image_accepts_bearer_token_when_signed_link_is_missing(tmp_path):

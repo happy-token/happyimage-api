@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import secrets
 import time
 from urllib.parse import quote, unquote, urlsplit
@@ -192,8 +191,7 @@ def _auth_login_response(
 def _test_login_token(email: str, password: str) -> str:
     enabled = (
         str(
-            os.getenv("HAPPYTOKEN_TEST_ACCOUNTS_ENABLED")
-            or config.data.get("test_accounts_enabled", "false")
+            config.data.get("test_accounts_enabled", "false")
         )
         .strip()
         .lower()
@@ -297,8 +295,7 @@ def _extract_image_access_path(body: ImageAccessLinkRequest) -> str:
 def _registration_enabled() -> bool:
     enabled = (
         str(
-            os.getenv("HAPPYTOKEN_REGISTRATION_ENABLED")
-            or config.data.get("registration_enabled", "false")
+            config.data.get("registration_enabled", "false")
         )
         .strip()
         .lower()
@@ -309,8 +306,7 @@ def _registration_enabled() -> bool:
 def _local_password_login_enabled() -> bool:
     enabled = (
         str(
-            os.getenv("HAPPYTOKEN_LOCAL_PASSWORD_LOGIN_ENABLED")
-            or config.data.get("local_password_login_enabled", "false")
+            config.data.get("local_password_login_enabled", "false")
         )
         .strip()
         .lower()
