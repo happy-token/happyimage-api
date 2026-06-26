@@ -1,5 +1,7 @@
 # 本地部署测试配置
 # docker compose -f docker-compose.test.yml up -d
+# 运行时设置（public_app_url、api_public_url、session_secret、OIDC、CORS、
+# model_gateway 等）请通过挂载的 config.json、首次 /setup 或管理员 /settings 配置。
 
 services:
   postgres:
@@ -33,11 +35,6 @@ services:
     environment:
       STORAGE_BACKEND: postgres
       DATABASE_URL: "postgresql://happytoken:happytoken-local-dev@postgres:5432/happytoken"
-      HAPPYTOKEN_SESSION_SECRET: "local-test-secret-do-not-use-in-prod"
-      HAPPYTOKEN_FRONTEND_BASE_URL: "http://localhost:3000"
-      HAPPYTOKEN_API_BASE_URL: "http://localhost:8000"
-      HAPPYTOKEN_CORS_ORIGINS: "http://localhost:3000"
-      HAPPYTOKEN_REGISTRATION_ENABLED: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -57,7 +54,6 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: ""
       BACKEND_URL: "http://happytoken-api:80"
-      MODEL_BACKEND_URL: "http://happytoken-api:80"
     depends_on:
       happytoken-api:
         condition: service_started

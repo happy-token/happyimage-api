@@ -7,11 +7,11 @@ OpenAI-compatible image API and self-hosted creation workspace.
 - Project type: web app + API
 - Runtime: Docker
 - Service name: `happytoken`
-- Required secret: `HAPPYTOKEN_SESSION_SECRET`
+- Runtime settings such as `session_secret`, `session_cookie_domain`, `public_app_url`, `api_public_url`, and `cors_origins` are managed through `config.json`, first-run `/setup`, or admin `/settings`.
 - Example health check: `curl -sf http://localhost:3000/health?format=json`
 - Docker deployment guide: `docs/docker-deployment.md`
 
-Keep production hosts, remote aliases, service paths, auth keys, and account data outside git. Use `.env` and `config.json` from `config.example.json` for local or server-specific configuration.
+Keep production hosts, remote aliases, service paths, auth keys, and account data outside git. Keep deployment `.env` files infrastructure-only; use `config.json` from `config.example.json`, `/setup`, or admin `/settings` for runtime application configuration.
 
 ## Build Notes
 

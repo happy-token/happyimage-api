@@ -3,6 +3,8 @@
 #
 # 这个配置只启动后端 API 服务，不包含 Web 面板。
 # 需要 Web 面板时，使用 docker-compose.yml 或直接从 happytoken-web 仓库部署前端。
+# 运行时设置（public_app_url、api_public_url、session_secret、OIDC、CORS、
+# model_gateway 等）请通过 config.json、首次 /setup 或管理员 /settings 配置。
 
 services:
   happytoken-api:
@@ -20,22 +22,8 @@ services:
       - ./data:/app/data
       - ./config.json:/app/config.json:rw
     environment:
-      STORAGE_BACKEND: ${STORAGE_BACKEND:-postgres}
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required when STORAGE_BACKEND=postgres}
-      HAPPYTOKEN_AUTH_KEY: ${HAPPYTOKEN_AUTH_KEY:-}
-      HAPPYTOKEN_BASE_URL: ${HAPPYTOKEN_BASE_URL:-}
-      HAPPYTOKEN_REGISTRATION_ENABLED: ${HAPPYTOKEN_REGISTRATION_ENABLED:-true}
-
-      HAPPYTOKEN_SESSION_SECRET: ${HAPPYTOKEN_SESSION_SECRET:-}
-      HAPPYTOKEN_FRONTEND_BASE_URL: ${HAPPYTOKEN_FRONTEND_BASE_URL:-http://localhost:3000}
-      HAPPYTOKEN_API_BASE_URL: ${HAPPYTOKEN_API_BASE_URL:-http://localhost:8000}
-
-      HAPPYTOKEN_OIDC_ENABLED: ${HAPPYTOKEN_OIDC_ENABLED:-}
-      HAPPYTOKEN_OIDC_ISSUER: ${HAPPYTOKEN_OIDC_ISSUER:-}
-      HAPPYTOKEN_OIDC_CLIENT_ID: ${HAPPYTOKEN_OIDC_CLIENT_ID:-}
-      HAPPYTOKEN_OIDC_CLIENT_SECRET: ${HAPPYTOKEN_OIDC_CLIENT_SECRET:-}
-      HAPPYTOKEN_OIDC_SCOPES: ${HAPPYTOKEN_OIDC_SCOPES:-openid profile email}
-      HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS: ${HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS:-}
+      STORAGE_BACKEND: json
+      DATABASE_URL: ""
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1/health?format=json', timeout=3).read()"]
       interval: 30s
