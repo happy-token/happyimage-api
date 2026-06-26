@@ -41,7 +41,7 @@ class WebSessionService:
     def _secret(self) -> str:
         secret = config.session_secret
         if not secret:
-            raise WebSessionError("HAPPYTOKEN_SESSION_SECRET 未配置")
+            raise WebSessionError("session_secret 未配置")
         return secret
 
     @property
