@@ -119,25 +119,13 @@ def _normalize_image_storage_settings(value: object) -> dict[str, object]:
 def _normalize_oidc_settings(value: object) -> dict[str, object]:
     source = value if isinstance(value, dict) else {}
     return {
-        "enabled": _normalize_bool(
-            _getenv("HAPPYTOKEN_OIDC_ENABLED") or source.get("enabled"), False
-        ),
-        "issuer": str(
-            _getenv("HAPPYTOKEN_OIDC_ISSUER") or source.get("issuer") or ""
-        ).strip().rstrip("/"),
-        "client_id": str(
-            _getenv("HAPPYTOKEN_OIDC_CLIENT_ID") or source.get("client_id") or ""
-        ).strip(),
-        "client_secret": str(
-            _getenv("HAPPYTOKEN_OIDC_CLIENT_SECRET") or source.get("client_secret") or ""
-        ).strip(),
-        "scopes": str(
-            _getenv("HAPPYTOKEN_OIDC_SCOPES") or source.get("scopes") or "openid profile email"
-        ).strip(),
+        "enabled": _normalize_bool(source.get("enabled"), False),
+        "issuer": str(source.get("issuer") or "").strip().rstrip("/"),
+        "client_id": str(source.get("client_id") or "").strip(),
+        "client_secret": str(source.get("client_secret") or "").strip(),
+        "scopes": str(source.get("scopes") or "openid profile email").strip(),
         "allowed_email_domains": str(
-            _getenv("HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS")
-            or source.get("allowed_email_domains")
-            or ""
+            source.get("allowed_email_domains") or ""
         ).strip(),
     }
 
@@ -203,7 +191,16 @@ class ConfigStore:
 
     def _load(self) -> dict[str, object]:
         if self._storage_backend is not None:
-            return self._storage_backend.load_runtime_config()
+            data = self._storage_backend.load_runtime_config()
+            if data:
+                return data
+            legacy_data = self._load_legacy_file()
+            if legacy_data:
+                self._storage_backend.save_runtime_config(legacy_data)
+            return legacy_data
+        return self._load_legacy_file()
+
+    def _load_legacy_file(self) -> dict[str, object]:
         return _read_json_object(self.path, name="config.json")
 
     def _save(self) -> None:
@@ -349,11 +346,7 @@ class ConfigStore:
 
     @property
     def base_url(self) -> str:
-        return str(
-            _getenv("HAPPYTOKEN_BASE_URL")
-            or self.data.get("base_url")
-            or ""
-        ).strip().rstrip("/")
+        return _normalize_url(self.data.get("base_url"))
 
     @property
     def public_app_url(self) -> str:
@@ -391,20 +384,13 @@ class ConfigStore:
 
     @property
     def session_cookie_name(self) -> str:
-        value = str(
-            _getenv("HAPPYTOKEN_SESSION_COOKIE_NAME")
-            or self.data.get("session_cookie_name")
-            or "happytoken_session"
-        ).strip()
+        value = str(self.data.get("session_cookie_name") or "happytoken_session").strip()
         return "happytoken_session" if value == "happyimage_session" else value
 
     @property
     def session_max_age_seconds(self) -> int:
         try:
-            return max(60, int(
-                _getenv("HAPPYTOKEN_SESSION_MAX_AGE_SECONDS")
-                or self.data.get("session_max_age_seconds", 86400)
-            ))
+            return max(60, int(self.data.get("session_max_age_seconds", 86400)))
         except (TypeError, ValueError):
             return 86400
 
@@ -413,11 +399,7 @@ class ConfigStore:
         """Session cookie domain (e.g., 'happytoken.workers.dev' or 'happy-token.cn').
         If empty, cookie domain is not explicitly set (uses browser implicit rules).
         """
-        return str(
-            _getenv("HAPPYTOKEN_SESSION_COOKIE_DOMAIN")
-            or self.data.get("session_cookie_domain")
-            or ""
-        ).strip()
+        return str(self.data.get("session_cookie_domain") or "").strip()
 
     @property
     def app_version(self) -> str:
@@ -469,7 +451,7 @@ class ConfigStore:
         return data
 
     def get_proxy_settings(self) -> str:
-        return str(_getenv("HAPPYTOKEN_PROXY") or self.data.get("proxy") or "").strip()
+        return str(self.data.get("proxy") or "").strip()
 
     def update(self, data: dict[str, object]) -> dict[str, object]:
         next_data = dict(self.data)

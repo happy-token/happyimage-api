@@ -119,25 +119,119 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(response["model_gateway"]["gateway_api_base_url"], "https://gateway.happy-token.cn/v1")
         self.assertEqual(response["model_gateway"]["gateway_management_url"], "https://gateway.happy-token.cn")
 
+    def test_config_store_migrates_legacy_file_into_empty_storage_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            config_path = tmp_path / "config.json"
+            runtime_config_path = tmp_path / "runtime_config.json"
+            config_path.write_text(
+                json.dumps({"public_app_url": "https://legacy.example.com/"}),
+                encoding="utf-8",
+            )
+
+            from services.storage.json_storage import JSONStorageBackend
+
+            backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                runtime_config_path,
+            )
+            store = self.config_module.ConfigStore(config_path, storage_backend=backend)
+
+            self.assertEqual(store.public_app_url, "https://legacy.example.com")
+            self.assertEqual(
+                json.loads(runtime_config_path.read_text(encoding="utf-8")),
+                {"public_app_url": "https://legacy.example.com/"},
+            )
+
+    def test_config_store_uses_json_storage_backend_for_runtime_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+
+            from services.storage.json_storage import JSONStorageBackend
+
+            backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                tmp_path / "runtime_config.json",
+            )
+            store = self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=backend)
+            store.update({"public_app_url": "https://json.example.com/"})
+
+            reloaded_backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                tmp_path / "runtime_config.json",
+            )
+            reloaded = self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=reloaded_backend)
+
+            self.assertEqual(reloaded.public_app_url, "https://json.example.com")
+
+    def test_config_store_uses_database_storage_backend_for_runtime_settings(self) -> None:
+        try:
+            from services.storage.database_storage import DatabaseStorageBackend
+        except ImportError as exc:
+            self.skipTest(f"database storage dependencies unavailable: {exc}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            database_url = f"sqlite:///{tmp_path / 'runtime.db'}"
+            backend = DatabaseStorageBackend(database_url)
+            store = self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=backend)
+            store.update({"public_app_url": "https://sqlite.example.com/"})
+
+            reloaded = self.config_module.ConfigStore(
+                tmp_path / "config.json",
+                storage_backend=DatabaseStorageBackend(database_url),
+            )
+
+            self.assertEqual(reloaded.public_app_url, "https://sqlite.example.com")
+
     def test_service_runtime_settings_ignore_happytoken_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             module = self.config_module
-            old_session_secret = module.os.environ.get("HAPPYTOKEN_SESSION_SECRET")
-            old_frontend_base_url = module.os.environ.get("HAPPYTOKEN_FRONTEND_BASE_URL")
+            env_values = {
+                "HAPPYTOKEN_BASE_URL": "https://env-base.example.com",
+                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://env.example.com",
+                "HAPPYTOKEN_SESSION_SECRET": "env-session-secret",
+                "HAPPYTOKEN_SESSION_COOKIE_NAME": "env_cookie",
+                "HAPPYTOKEN_SESSION_MAX_AGE_SECONDS": "12345",
+                "HAPPYTOKEN_SESSION_COOKIE_DOMAIN": "env.example.com",
+                "HAPPYTOKEN_PROXY": "http://proxy.example.com",
+                "HAPPYTOKEN_OIDC_ENABLED": "true",
+                "HAPPYTOKEN_OIDC_ISSUER": "https://issuer.example.com",
+                "HAPPYTOKEN_OIDC_CLIENT_ID": "env-client-id",
+                "HAPPYTOKEN_OIDC_CLIENT_SECRET": "env-client-secret",
+                "HAPPYTOKEN_OIDC_SCOPES": "openid email",
+                "HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS": "example.com",
+            }
+            old_env = {key: module.os.environ.get(key) for key in env_values}
             try:
-                module.os.environ["HAPPYTOKEN_SESSION_SECRET"] = "env-session-secret"
-                module.os.environ["HAPPYTOKEN_FRONTEND_BASE_URL"] = "https://env.example.com"
+                module.os.environ.update(env_values)
 
                 store = module.ConfigStore(Path(tmp_dir) / "config.json")
 
+                self.assertEqual(store.base_url, "")
                 self.assertEqual(store.session_secret, "")
                 self.assertEqual(store.public_app_url, "")
                 self.assertEqual(store.frontend_base_url, "")
+                self.assertEqual(store.session_cookie_name, "happytoken_session")
+                self.assertEqual(store.session_max_age_seconds, 86400)
+                self.assertEqual(store.session_cookie_domain, "")
+                self.assertEqual(store.get_proxy_settings(), "")
+                self.assertEqual(
+                    store.get_oidc_settings(),
+                    {
+                        "enabled": False,
+                        "issuer": "",
+                        "client_id": "",
+                        "client_secret": "",
+                        "scopes": "openid profile email",
+                        "allowed_email_domains": "",
+                    },
+                )
             finally:
-                for key, value in {
-                    "HAPPYTOKEN_SESSION_SECRET": old_session_secret,
-                    "HAPPYTOKEN_FRONTEND_BASE_URL": old_frontend_base_url,
-                }.items():
+                for key, value in old_env.items():
                     if value is None:
                         module.os.environ.pop(key, None)
                     else:
