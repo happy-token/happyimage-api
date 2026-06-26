@@ -50,7 +50,6 @@ happyimage-api                    -> stores user, history, gallery, private imag
 ```bash
 git clone git@github.com:happy-token/happyimage-api.git
 cd happyimage-api
-cp .env.example .env
 cp config.example.json config.json
 docker compose up -d
 curl -sf http://localhost:8000/health?format=json
@@ -63,7 +62,7 @@ curl -sf http://localhost:8000/health?format=json
 | API | `http://localhost:8000` |
 | 健康检查 | `http://localhost:8000/health?format=json` |
 
-首次部署后，使用 `/setup` 或 Web 管理设置页维护公开地址、会话密钥、OIDC、NewAPI 绑定、模型网关、图片存储、代理和安全设置。不要把这些运行时设置放回 Docker Compose 或 `.env.example`。
+默认启动不需要 `.env`。只有要覆盖端口、镜像、存储后端或 `DATABASE_URL` 时，才复制 `.env.example` 为 `.env`。首次部署后，使用 `/setup` 或 Web 管理设置页维护公开地址、会话密钥、OIDC、NewAPI 绑定、模型网关、图片存储、代理和安全设置。不要把这些运行时设置放回 Docker Compose 或 `.env.example`。
 
 ## 本地开发
 
@@ -91,6 +90,15 @@ uv run pytest -m live
 
 ## 配置模型
 
+配置分两层：
+
+| 层级 | 文件 / 入口 | 放什么 |
+|:--|:--|:--|
+| 基础设施覆盖，可选 | `.env` | 端口、镜像、`STORAGE_BACKEND`、`DATABASE_URL`、构建基础镜像 |
+| 应用运行时设置 | `config.json`、首次 `/setup`、Web 管理设置页 | 公开 URL、会话密钥、OIDC、模型网关、NewAPI 绑定、图片存储、审核和安全设置 |
+
+默认本地或测试启动只需要复制 `config.example.json` 为 `config.json`。`.env` 不是必需文件。
+
 部署环境变量只保留基础设施项：
 
 | 变量 | 说明 |
@@ -113,6 +121,8 @@ uv run pytest -m live
 | Proxy | `proxy` |
 | Image storage | `image_storage.*`、`image_retention_days`、`image_access_token_ttl_seconds` |
 | Safety settings | `sensitive_words`、`ai_review.*`、`global_system_prompt` |
+
+`config.example.json` 只提供初始字段和默认值，避免容器启动时把挂载目标创建成目录。首次 `/setup` 或管理员设置保存后，以当前运行时配置为准。
 
 `config.example.json` uses the current field names:
 
@@ -214,7 +224,7 @@ Docker 部署时，容器内 `/app/data` 会挂载到仓库目录下的 `./data`
 | `data/logs.jsonl`、`data/share_drafts.json`、`data/image_tags.json` | 日志、分享草稿、图片标签 | 否，可能敏感 |
 | `../happyimage-gallery-source/image-gallery-seed/` | 官方图库源数据 | 仓库外保存；生产使用 Web 静态包 |
 
-升级前建议备份 `config.json` 和 `data/`。生产主机、远程路径、密钥和第三方令牌请放在 `.env`、`config.json` 或服务器私有配置中，不要提交到 git。
+升级前建议备份 `config.json` 和 `data/`。生产主机、远程路径、密钥和第三方令牌不要提交到 git；基础设施覆盖才放 `.env`，应用运行时设置放 `config.json`、`/setup` 或管理设置页。
 
 ## Docker 镜像
 

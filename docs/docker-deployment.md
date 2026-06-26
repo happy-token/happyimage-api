@@ -1,6 +1,6 @@
 # Docker 部署指南
 
-本文说明 HappyImage API 使用 Docker Compose 启动、升级和排障的常用流程。生产主机、远程路径、账号、密钥、代理地址和第三方令牌请放在 `.env`、`config.json` 或服务器私有配置中，不要提交到 git。
+本文说明 HappyImage API 使用 Docker Compose 启动、升级和排障的常用流程。生产主机、远程路径、账号、密钥、代理地址和第三方令牌不要提交到 git；基础设施覆盖才放 `.env`，应用运行时设置放 `config.json`、首次 `/setup` 或 Web 管理设置页。
 
 ## 当前部署形态
 
@@ -17,15 +17,14 @@
 | 文件 | 用途 |
 |:--|:--|
 | `docker-compose.yml` | 默认 API 服务配置，宿主机端口 `8000` 映射到容器 `80` |
-| `.env.example` | 基础设施环境变量模板，复制为 `.env` 后填写本机或服务器配置 |
-| `config.example.json` | 应用运行时配置模板，复制为 `config.json` 后可在设置页继续维护 |
+| `.env.example` | 可选基础设施环境变量模板；只有要覆盖端口、镜像、存储后端或数据库连接时才复制为 `.env` |
+| `config.example.json` | 应用运行时配置模板，复制为 `config.json` 后由首次 `/setup` 或设置页继续维护 |
 | `data/` | 运行数据目录，包含用户、日志、图片任务和缓存图片 |
 | `scripts/docker-entrypoint.sh` | 容器启动入口，负责初始化运行数据目录 |
 
 ## 首次启动
 
 ```bash
-cp .env.example .env
 cp config.example.json config.json
 docker compose up -d
 docker compose ps
@@ -39,7 +38,7 @@ curl -sf http://localhost:8000/health?format=json
 | API 根地址 | `http://localhost:8000` |
 | 健康检查 | `http://localhost:8000/health?format=json` |
 
-首次部署后，使用 Web `/setup` 或管理设置页维护公开地址、会话密钥、OIDC、NewAPI 绑定、模型网关、图片存储、代理和安全设置。
+默认启动不需要 `.env`。只有要覆盖端口、镜像、存储后端或 `DATABASE_URL` 时，才复制 `.env.example` 为 `.env`。首次部署后，使用 Web `/setup` 或管理设置页维护公开地址、会话密钥、OIDC、NewAPI 绑定、模型网关、图片存储、代理和安全设置。
 
 ## 预构建镜像
 
@@ -56,6 +55,15 @@ image: ghcr.io/happy-token/happyimage-api:latest
 ```
 
 ## 配置优先级
+
+配置分两层：
+
+| 层级 | 文件 / 入口 | 放什么 |
+|:--|:--|:--|
+| 基础设施覆盖，可选 | `.env` | 端口、镜像、`STORAGE_BACKEND`、`DATABASE_URL`、构建基础镜像 |
+| 应用运行时设置 | `config.json`、首次 `/setup`、Web 管理设置页 | 公开 URL、会话密钥、OIDC、模型网关、NewAPI 绑定、图片存储、审核和安全设置 |
+
+默认本地或测试启动只需要复制 `config.example.json` 为 `config.json`。`.env` 不是必需文件。
 
 部署 `.env` 只保留基础设施项：
 
@@ -170,12 +178,11 @@ DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happyimage
 ```bash
 rsync -av --progress ./data/ user@server:/srv/happyimage-api/data/
 rsync -av --progress ./config.json user@server:/srv/happyimage-api/config.json
-rsync -av --progress ./.env user@server:/srv/happyimage-api/.env
 
 ssh user@server
 cd /srv/happyimage-api
 chmod 700 data
-chmod 600 .env config.json
+chmod 600 config.json
 docker compose up -d
 ```
 
