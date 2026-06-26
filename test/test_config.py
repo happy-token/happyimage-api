@@ -156,6 +156,108 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertEqual(settings["token_name"], "Legacy Token")
             self.assertTrue(settings["enabled"])
 
+    def test_public_config_redacts_model_gateway_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "model_gateway": {
+                            "gateway_api_base_url": "https://gateway.example.com/",
+                            "gateway_management_url": "",
+                            "provision_url": "https://provision.example.com",
+                            "provision_secret": "super-secret",
+                            "sql_dsn": "postgresql://user:secret@db/new-api",
+                            "token_name": "Secret Token",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.config_module.ConfigStore(config_path).get()
+            model_gateway = response["model_gateway"]
+
+            self.assertNotIn("provision_secret", model_gateway)
+            self.assertNotIn("sql_dsn", model_gateway)
+            self.assertTrue(model_gateway["provision_secret_configured"])
+            self.assertTrue(model_gateway["sql_dsn_configured"])
+            self.assertEqual(model_gateway["gateway_api_base_url"], "https://gateway.example.com/v1")
+            self.assertEqual(model_gateway["gateway_management_url"], "https://gateway.example.com")
+
+    def test_public_config_does_not_expose_legacy_newapi_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "newapi_binding": {
+                            "base_url": "https://legacy-gateway.example.com/",
+                            "provision_secret": "legacy-secret",
+                            "sql_dsn": "sqlite:///legacy.db",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            response = self.config_module.ConfigStore(config_path).get()
+            model_gateway = response["model_gateway"]
+
+            self.assertNotIn("newapi_binding", response)
+            self.assertNotIn("provision_secret", model_gateway)
+            self.assertNotIn("sql_dsn", model_gateway)
+            self.assertTrue(model_gateway["provision_secret_configured"])
+            self.assertTrue(model_gateway["sql_dsn_configured"])
+
+    def test_model_gateway_update_preserves_existing_redacted_secrets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps(
+                    {
+                        "model_gateway": {
+                            "gateway_api_base_url": "https://old-gateway.example.com/v1",
+                            "gateway_management_url": "https://old-admin.example.com",
+                            "provision_url": "https://old-provision.example.com",
+                            "provision_secret": "stored-secret",
+                            "sql_dsn": "postgresql://stored:secret@db/new-api",
+                            "token_name": "Old Token",
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            store = self.config_module.ConfigStore(config_path)
+            response = store.update(
+                {
+                    "model_gateway": {
+                        "gateway_api_base_url": "https://new-gateway.example.com/",
+                        "gateway_management_url": "",
+                        "provision_url": "https://new-provision.example.com",
+                        "provision_secret": "",
+                        "provision_secret_configured": True,
+                        "sql_dsn_configured": True,
+                        "token_name": "New Token",
+                    }
+                }
+            )
+
+            saved = json.loads(config_path.read_text(encoding="utf-8"))
+            saved_gateway = saved["model_gateway"]
+            response_gateway = response["model_gateway"]
+            self.assertEqual(saved_gateway["gateway_api_base_url"], "https://new-gateway.example.com/v1")
+            self.assertEqual(saved_gateway["gateway_management_url"], "https://new-gateway.example.com")
+            self.assertEqual(saved_gateway["provision_url"], "https://new-provision.example.com")
+            self.assertEqual(saved_gateway["provision_secret"], "stored-secret")
+            self.assertEqual(saved_gateway["sql_dsn"], "postgresql://stored:secret@db/new-api")
+            self.assertEqual(saved_gateway["token_name"], "New Token")
+            self.assertNotIn("provision_secret", response_gateway)
+            self.assertNotIn("sql_dsn", response_gateway)
+            self.assertTrue(response_gateway["provision_secret_configured"])
+            self.assertTrue(response_gateway["sql_dsn_configured"])
+
     def test_config_store_migrates_legacy_file_into_empty_storage_backend(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)

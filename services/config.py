@@ -140,6 +140,15 @@ def _redact_oidc_secret(oidc: dict[str, object]) -> dict[str, object]:
     return redacted
 
 
+def _redact_model_gateway_secret(settings: dict[str, object]) -> dict[str, object]:
+    redacted = dict(settings)
+    redacted["provision_secret_configured"] = bool(str(redacted.get("provision_secret") or "").strip())
+    redacted["sql_dsn_configured"] = bool(str(redacted.get("sql_dsn") or "").strip())
+    redacted.pop("provision_secret", None)
+    redacted.pop("sql_dsn", None)
+    return redacted
+
+
 def _validate_image_storage_settings(settings: dict[str, object]) -> None:
     if not _normalize_bool(settings.get("enabled"), False):
         return
@@ -432,9 +441,10 @@ class ConfigStore:
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
         data["image_storage"] = self.get_image_storage_settings()
-        data["model_gateway"] = self.get_model_gateway_settings()
+        data["model_gateway"] = _redact_model_gateway_secret(self.get_model_gateway_settings())
         data.pop("auth-key", None)
         data.pop("session_secret", None)
+        data.pop("newapi_binding", None)
         data.pop("model_gateway_api_key", None)
         data.pop("model_gateway_provider", None)
         data.pop("model_gateway_base_url", None)
@@ -465,6 +475,16 @@ class ConfigStore:
                 if not str(normalized.get("client_secret") or "").strip():
                     normalized["client_secret"] = self.get_oidc_settings().get("client_secret", "")
                 next_data["oidc"] = normalized
+        if "model_gateway" in next_data:
+            incoming_gateway = next_data.get("model_gateway")
+            if isinstance(incoming_gateway, dict):
+                existing_gateway = self.get_model_gateway_settings()
+                normalized_gateway = self._normalize_model_gateway_storage(incoming_gateway)
+                if not str(normalized_gateway.get("provision_secret") or "").strip():
+                    normalized_gateway["provision_secret"] = existing_gateway.get("provision_secret", "")
+                if not str(normalized_gateway.get("sql_dsn") or "").strip():
+                    normalized_gateway["sql_dsn"] = existing_gateway.get("sql_dsn", "")
+                next_data["model_gateway"] = normalized_gateway
         next_data.pop("backup_state", None)
         next_data.pop("session_secret_configured", None)
         next_data.pop("model_gateway_api_key_configured", None)
@@ -488,6 +508,28 @@ class ConfigStore:
     def get_oidc_settings(self) -> dict[str, object]:
         return _normalize_oidc_settings(self.data.get("oidc"))
 
+    def _normalize_model_gateway_storage(self, source: dict[str, object]) -> dict[str, object]:
+        api_url = _normalize_gateway_api_url(
+            source.get("gateway_api_base_url")
+            or source.get("base_url")
+            or "https://gateway.happy-token.cn/v1"
+        )
+        management_url = _normalize_url(source.get("gateway_management_url") or source.get("management_url"))
+        if not management_url:
+            management_url = _derive_gateway_management_url(api_url)
+        provision_url = str(source.get("provision_url") or "").strip()
+        provision_secret = str(source.get("provision_secret") or "").strip()
+        sql_dsn = str(source.get("sql_dsn") or "").strip()
+        token_name = (str(source.get("token_name") or "").strip() or "HappyImage Default")[:80]
+        return {
+            "gateway_api_base_url": api_url,
+            "gateway_management_url": management_url,
+            "provision_url": provision_url,
+            "provision_secret": provision_secret,
+            "sql_dsn": sql_dsn,
+            "token_name": token_name,
+        }
+
     def get_model_gateway_settings(self) -> dict[str, object]:
         model_gateway = self.data.get("model_gateway")
         legacy_binding = self.data.get("newapi_binding")
@@ -497,18 +539,13 @@ class ConfigStore:
             source = legacy_binding
         else:
             source = {}
-        api_url = _normalize_gateway_api_url(
-            source.get("gateway_api_base_url")
-            or source.get("base_url")
-            or "https://gateway.happy-token.cn/v1"
-        )
-        management_url = _normalize_url(source.get("gateway_management_url") or source.get("management_url"))
-        if not management_url:
-            management_url = _derive_gateway_management_url(api_url)
-        sql_dsn = str(source.get("sql_dsn") or "").strip()
-        provision_url = str(source.get("provision_url") or "").strip()
-        provision_secret = str(source.get("provision_secret") or "").strip()
-        token_name = (str(source.get("token_name") or "").strip() or "HappyImage Default")[:80]
+        normalized = self._normalize_model_gateway_storage(source)
+        api_url = str(normalized["gateway_api_base_url"])
+        management_url = str(normalized["gateway_management_url"])
+        sql_dsn = str(normalized["sql_dsn"])
+        provision_url = str(normalized["provision_url"])
+        provision_secret = str(normalized["provision_secret"])
+        token_name = str(normalized["token_name"])
         return {
             "gateway_api_base_url": api_url,
             "gateway_management_url": management_url,
