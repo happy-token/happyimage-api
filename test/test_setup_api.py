@@ -1,4 +1,6 @@
+import concurrent.futures
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -40,6 +42,42 @@ class SetupAPITests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         return TestClient(app_module.create_app())
+
+    def make_auth_service(self):
+        from services.storage.json_storage import JSONStorageBackend
+        from services.auth_service import AuthService
+
+        storage = JSONStorageBackend(
+            self.data_dir / "accounts.json",
+            self.data_dir / "auth_keys.json",
+            self.data_dir / "runtime_config.json",
+        )
+        return AuthService(storage)
+
+    def test_create_first_admin_with_value_is_atomic(self) -> None:
+        auth = self.make_auth_service()
+        ready = threading.Barrier(2)
+
+        def create(candidate: str) -> tuple[bool, str]:
+            ready.wait()
+            try:
+                item = auth.create_first_admin_with_value(
+                    name=f"Owner {candidate}",
+                    key=f"owner-secret-key-{candidate}",
+                )
+            except ValueError as exc:
+                return False, str(exc)
+            return True, str(item["id"])
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(create, ["one", "two"]))
+
+        successes = [result for result in results if result[0]]
+        failures = [result for result in results if not result[0]]
+        self.assertEqual(len(successes), 1)
+        self.assertEqual(len(failures), 1)
+        self.assertEqual(failures[0][1], "初始化已完成")
+        self.assertEqual(len(auth.list_keys("admin")), 1)
 
     def test_setup_status_open_when_no_admin_exists(self) -> None:
         client = self.make_client()
@@ -111,6 +149,31 @@ class SetupAPITests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["role"], "admin")
+
+    def test_admin_key_login_rejects_invalid_key(self) -> None:
+        client = self.make_client()
+        setup_response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+        self.assertEqual(setup_response.status_code, 200)
+
+        response = client.post(
+            "/api/auth/admin-key-login",
+            json={"key": "not-the-admin-key"},
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"]["error"], "管理员密钥无效")
 
 
 if __name__ == "__main__":

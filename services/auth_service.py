@@ -403,6 +403,30 @@ class AuthService:
             self._save()
             return self._public_item(item)
 
+    def create_first_admin_with_value(
+        self, *, name: str = "", key: str = ""
+    ) -> dict[str, object]:
+        with self._lock:
+            self._reload_locked()
+            if any(item.get("role") == "admin" for item in self._items):
+                raise ValueError("初始化已完成")
+            normalized_name = self._build_name_locked(name, role="admin")
+            key_hash = self._build_key_hash_locked(key)
+            item = {
+                "id": uuid.uuid4().hex[:12],
+                "name": normalized_name,
+                "role": "admin",
+                "key_hash": key_hash,
+                "enabled": True,
+                "watermark_label": "",
+                "watermark_unlocked": False,
+                "created_at": _now_iso(),
+                "last_used_at": None,
+            }
+            self._items.append(item)
+            self._save()
+            return self._public_item(item)
+
     def update_key(
         self,
         key_id: str,

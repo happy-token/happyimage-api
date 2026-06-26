@@ -471,14 +471,17 @@ def create_router(app_version: str) -> APIRouter:
             )
         try:
             next_config = _normalize_setup_config(body)
-            config_response = config.update(next_config)
             admin = await run_in_threadpool(
-                auth_service.create_key_with_value,
-                role="admin",
+                auth_service.create_first_admin_with_value,
                 name=body.admin_name.strip() or "管理员",
                 key=admin_key,
             )
+            config_response = config.update(next_config)
         except ValueError as exc:
+            if str(exc) == "初始化已完成":
+                raise HTTPException(
+                    status_code=403, detail={"error": "初始化已完成"}
+                ) from exc
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return {
             "ok": True,
