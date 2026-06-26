@@ -1,48 +1,140 @@
 from __future__ import annotations
 
+import json
 from unittest import mock
 
 from services.auth_service import AuthService
-from services.config import ConfigStore, CONFIG_FILE
+from services.config import ConfigStore
 from services.newapi_binding_service import NewAPIBindingService, newapi_binding_service
 from services.storage.json_storage import JSONStorageBackend
 
 
-def test_newapi_binding_settings_from_env():
+def test_newapi_binding_settings_use_model_gateway_config_and_ignore_env(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "model_gateway": {
+                    "gateway_api_base_url": "https://config-gateway.example.com/",
+                    "gateway_management_url": "https://config-admin.example.com/",
+                    "provision_url": "http://configured-newapi:3000/api/internal/happyimage/bind-token",
+                    "provision_secret": "configured-secret",
+                    "token_name": "Configured Token",
+                    "sql_dsn": "",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
     with mock.patch.dict(
         "os.environ",
         {
-            "HAPPYTOKEN_NEWAPI_BASE_URL": "https://gateway.happy-token.cn/",
-            "HAPPYTOKEN_NEWAPI_MANAGEMENT_URL": "https://gateway.happy-token.cn",
-            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "http://newapi:3000/api/internal/happyimage/bind-token",
-            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "secret",
-            "HAPPYTOKEN_NEWAPI_TOKEN_NAME": "HappyImage Default",
-            "HAPPYTOKEN_NEWAPI_SQL_DSN": "",
+            "HAPPYTOKEN_NEWAPI_BASE_URL": "https://env-gateway.example.com/",
+            "HAPPYTOKEN_NEWAPI_MANAGEMENT_URL": "https://env-admin.example.com",
+            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "http://env-newapi:3000/bind-token",
+            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "env-secret",
+            "HAPPYTOKEN_NEWAPI_TOKEN_NAME": "Env Token",
+            "HAPPYTOKEN_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
         },
         clear=False,
     ):
-        store = ConfigStore(CONFIG_FILE)
+        store = ConfigStore(config_path)
+        settings = store.get_newapi_binding_settings()
+
+    assert settings["gateway_api_base_url"] == "https://config-gateway.example.com/v1"
+    assert settings["gateway_management_url"] == "https://config-admin.example.com"
+    assert settings["base_url"] == "https://config-gateway.example.com/v1"
+    assert settings["management_url"] == "https://config-admin.example.com"
+    assert settings["provision_url"] == "http://configured-newapi:3000/api/internal/happyimage/bind-token"
+    assert settings["provision_secret"] == "configured-secret"
+    assert settings["provision_secret_configured"] is True
+    assert settings["sql_dsn"] == ""
+    assert settings["sql_dsn_configured"] is False
+    assert settings["token_name"] == "Configured Token"
+    assert settings["enabled"] is True
+
+
+def test_newapi_binding_settings_use_legacy_newapi_binding_config(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "newapi_binding": {
+                    "base_url": "https://legacy-gateway.example.com/",
+                    "management_url": "https://legacy-admin.example.com/manage/",
+                    "provision_url": "http://legacy-newapi:3000/api/internal/happyimage/bind-token",
+                    "provision_secret": "legacy-secret",
+                    "token_name": "Legacy Token",
+                    "sql_dsn": "postgresql://newapi:secret@127.0.0.1:15433/new-api",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with mock.patch.dict(
+        "os.environ",
+        {
+            "HAPPYTOKEN_NEWAPI_BASE_URL": "https://env-gateway.example.com/",
+            "HAPPYIMAGE_NEWAPI_MANAGEMENT_URL": "https://env-admin.example.com",
+            "HAPPYIMAGE_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
+        },
+        clear=False,
+    ):
+        store = ConfigStore(config_path)
+        settings = store.get_newapi_binding_settings()
+
+    assert settings["gateway_api_base_url"] == "https://legacy-gateway.example.com/v1"
+    assert settings["gateway_management_url"] == "https://legacy-admin.example.com/manage"
+    assert settings["base_url"] == "https://legacy-gateway.example.com/v1"
+    assert settings["management_url"] == "https://legacy-admin.example.com/manage"
+    assert settings["provision_url"] == "http://legacy-newapi:3000/api/internal/happyimage/bind-token"
+    assert settings["provision_secret"] == "legacy-secret"
+    assert settings["provision_secret_configured"] is True
+    assert settings["sql_dsn"] == "postgresql://newapi:secret@127.0.0.1:15433/new-api"
+    assert settings["sql_dsn_configured"] is True
+    assert settings["token_name"] == "Legacy Token"
+    assert settings["enabled"] is True
+
+
+def test_newapi_binding_settings_ignore_env_when_config_empty(tmp_path):
+    with mock.patch.dict(
+        "os.environ",
+        {
+            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "http://env-newapi:3000/bind-token",
+            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "env-secret",
+            "HAPPYTOKEN_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
+            "HAPPYIMAGE_NEWAPI_BASE_URL": "https://legacy-env-gateway.example.com",
+        },
+        clear=False,
+    ):
+        store = ConfigStore(tmp_path / "config.json")
         settings = store.get_newapi_binding_settings()
 
     assert settings == {
-        "base_url": "https://gateway.happy-token.cn",
+        "gateway_api_base_url": "https://gateway.happy-token.cn/v1",
+        "gateway_management_url": "https://gateway.happy-token.cn",
+        "base_url": "https://gateway.happy-token.cn/v1",
         "management_url": "https://gateway.happy-token.cn",
-        "provision_url": "http://newapi:3000/api/internal/happyimage/bind-token",
-        "provision_secret_configured": True,
-        "provision_secret": "secret",
+        "provision_url": "",
+        "provision_secret_configured": False,
+        "provision_secret": "",
         "sql_dsn": "",
         "sql_dsn_configured": False,
         "token_name": "HappyImage Default",
-        "enabled": True,
+        "enabled": False,
     }
 
 
-def test_newapi_binding_defaults_to_pending_safe_values():
+def test_newapi_binding_defaults_to_pending_safe_values(tmp_path):
     with mock.patch.dict("os.environ", {}, clear=True):
-        store = ConfigStore(CONFIG_FILE)
+        store = ConfigStore(tmp_path / "config.json")
         settings = store.get_newapi_binding_settings()
 
-    assert settings["base_url"] == "https://gateway.happy-token.cn"
+    assert settings["gateway_api_base_url"] == "https://gateway.happy-token.cn/v1"
+    assert settings["gateway_management_url"] == "https://gateway.happy-token.cn"
+    assert settings["base_url"] == "https://gateway.happy-token.cn/v1"
     assert settings["management_url"] == "https://gateway.happy-token.cn"
     assert settings["token_name"] == "HappyImage Default"
     assert settings["enabled"] is False
@@ -50,49 +142,6 @@ def test_newapi_binding_defaults_to_pending_safe_values():
     assert settings["provision_secret_configured"] is False
     assert settings["sql_dsn"] == ""
     assert settings["sql_dsn_configured"] is False
-
-
-def test_newapi_binding_settings_enable_direct_sql_from_env():
-    with mock.patch.dict(
-        "os.environ",
-        {
-            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "",
-            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "",
-            "HAPPYTOKEN_NEWAPI_SQL_DSN": "postgresql://newapi:secret@postgres:5432/new-api",
-        },
-        clear=False,
-    ):
-        store = ConfigStore(CONFIG_FILE)
-        settings = store.get_newapi_binding_settings()
-
-    assert settings["enabled"] is True
-    assert settings["sql_dsn"] == "postgresql://newapi:secret@postgres:5432/new-api"
-    assert settings["sql_dsn_configured"] is True
-
-
-def test_newapi_binding_settings_accept_legacy_happyimage_env():
-    with mock.patch.dict(
-        "os.environ",
-        {
-            "HAPPYTOKEN_NEWAPI_BASE_URL": "",
-            "HAPPYTOKEN_NEWAPI_MANAGEMENT_URL": "",
-            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "",
-            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "",
-            "HAPPYTOKEN_NEWAPI_SQL_DSN": "",
-            "HAPPYIMAGE_NEWAPI_BASE_URL": "https://legacy-gateway.example",
-            "HAPPYIMAGE_NEWAPI_MANAGEMENT_URL": "https://legacy-gateway.example/manage",
-            "HAPPYIMAGE_NEWAPI_SQL_DSN": "postgresql://newapi:secret@127.0.0.1:15433/new-api",
-        },
-        clear=False,
-    ):
-        store = ConfigStore(CONFIG_FILE)
-        settings = store.get_newapi_binding_settings()
-
-    assert settings["base_url"] == "https://legacy-gateway.example"
-    assert settings["management_url"] == "https://legacy-gateway.example/manage"
-    assert settings["enabled"] is True
-    assert settings["sql_dsn"] == "postgresql://newapi:secret@127.0.0.1:15433/new-api"
-    assert settings["sql_dsn_configured"] is True
 
 
 def test_apply_newapi_default_provider_sets_selected_provider(tmp_path):
