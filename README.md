@@ -29,8 +29,8 @@ HappyImage API 不再暴露 HappyImage-owned `/v1/*` 兼容入口。产品图片
 
 | 模块 | 负责 | 不负责 |
 |:--|:--|:--|
-| `happyimage-api`（本仓库） | 产品后端、认证会话、用户、图片任务历史、用户图库、私有图片访问、设置、日志、NewAPI 绑定 | 前端页面渲染、官方图库静态资源发布、NewAPI 账号池管理、充值/额度、外部 `/v1` 兼容入口 |
-| `happyimage-web` | Next.js 前端、同源 middleware、用户工作台、官方图库静态包读取 | 用户历史/私有图库持久化、API 数据库、模型账号池、外部 `/v1` 代理 |
+| `happyimage-api`（本仓库） | 产品后端、认证会话、用户、图片任务历史、用户图库、私有图片访问、设置、日志、NewAPI 绑定 | 前端页面渲染、官方图库静态资源发布、NewAPI 账号池管理、充值/额度、外部模型协议兼容入口 |
+| `happyimage-web` | Next.js 前端、同源 middleware、用户工作台、官方图库静态包读取 | 用户历史/私有图库持久化、API 数据库、模型账号池、模型协议代理 |
 | `happyimage-gallery-source` | 官方图库源数据和候选池，供 Web 静态包导出 | 运行时服务、GitHub 版本化发布 |
 | NewAPI / 模型网关 | 模型渠道、账号池、上游调试、token、额度/计费路由 | HappyImage 用户登录、历史会话、用户图库、私有图片 |
 
