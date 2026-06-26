@@ -100,19 +100,6 @@ docker compose up -d
 
 示例 `model_gateway.gateway_api_base_url` 可以是 `https://gateway.happy-token.cn/v1`。这是上游模型网关 URL，不是 HappyImage API 暴露的兼容入口。
 
-## Removed Variable Migration
-
-| Removed variable | New home |
-|:--|:--|
-| `MODEL_BACKEND_URL` | `model_gateway.gateway_api_base_url` in API runtime settings; user generation uses selected provider Base URL |
-| `MODEL_BACKEND_API_KEY` | Default/user provider API key managed by HappyImage API; NewAPI binding secrets live under `model_gateway.*` |
-| `NEXT_PUBLIC_MODEL_API_BASE_URL` | Removed with Web model proxying |
-| `HAPPYTOKEN_FRONTEND_BASE_URL` | `public_app_url` |
-| `HAPPYTOKEN_API_BASE_URL` | `api_public_url` |
-| `HAPPYTOKEN_CORS_ORIGINS` | `cors_origins` or derived from `public_app_url` |
-| `HAPPYTOKEN_NEWAPI_BASE_URL` | `model_gateway.gateway_api_base_url` |
-| `HAPPYTOKEN_NEWAPI_MANAGEMENT_URL` | `model_gateway.gateway_management_url` |
-
 ## 配置 OIDC 单点登录
 
 1. 在 OIDC 提供方创建 OAuth 应用，获取 Client ID 和 Client Secret。
