@@ -30,6 +30,14 @@ class AuthKeyModel(Base):
     data = Column(Text, nullable=False)
 
 
+class RuntimeConfigModel(Base):
+    """Single-row runtime configuration."""
+    __tablename__ = "runtime_config"
+
+    key = Column(String(255), primary_key=True)
+    data = Column(Text, nullable=False)
+
+
 class DatabaseStorageBackend(StorageBackend):
     """数据库存储后端（支持 SQLite、PostgreSQL、MySQL 等）"""
 
@@ -70,6 +78,36 @@ class DatabaseStorageBackend(StorageBackend):
     def save_auth_keys(self, auth_keys: list[dict[str, Any]]) -> None:
         """保存鉴权密钥数据到数据库"""
         self._save_rows(AuthKeyModel, auth_keys, "id", "key_id")
+
+    def load_runtime_config(self) -> dict[str, Any]:
+        session = self.Session()
+        try:
+            row = session.query(RuntimeConfigModel).filter_by(key="default").first()
+            if row is None:
+                return {}
+            data = json.loads(row.data)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+        finally:
+            session.close()
+
+    def save_runtime_config(self, config: dict[str, Any]) -> None:
+        session = self.Session()
+        try:
+            row = session.query(RuntimeConfigModel).filter_by(key="default").first()
+            payload = json.dumps(config, ensure_ascii=False)
+            if row is None:
+                row = RuntimeConfigModel(key="default", data=payload)
+                session.add(row)
+            else:
+                row.data = payload
+            session.commit()
+        except Exception as exc:
+            session.rollback()
+            raise exc
+        finally:
+            session.close()
 
     def _load_rows(self, model: type[AccountModel] | type[AuthKeyModel]) -> list[dict[str, Any]]:
         session = self.Session()

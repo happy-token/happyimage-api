@@ -71,46 +71,72 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertNotIn("model_gateway_api_key", saved)
             self.assertNotIn("model_gateway_api_key_configured", response)
 
-    def test_prefixed_dotenv_loads_happytoken_settings_only(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            dotenv_path = Path(tmp_dir) / ".env"
-            dotenv_path.write_text(
-                "\n".join(
-                    [
-                        "HAPPYTOKEN_SESSION_SECRET=dotenv-session-secret",
-                        "HAPPYTOKEN_FRONTEND_BASE_URL=https://image.example.com",
-                        "STORAGE_BACKEND=sqlite",
-                    ]
-                ),
-                encoding="utf-8",
-            )
+    def test_config_store_uses_storage_backend_for_runtime_settings(self) -> None:
+        class MemoryStorage:
+            def __init__(self) -> None:
+                self.runtime_config: dict[str, object] = {}
 
+            def load_accounts(self) -> list[dict[str, object]]:
+                return []
+
+            def save_accounts(self, accounts: list[dict[str, object]]) -> None:
+                pass
+
+            def load_auth_keys(self) -> list[dict[str, object]]:
+                return []
+
+            def save_auth_keys(self, auth_keys: list[dict[str, object]]) -> None:
+                pass
+
+            def load_runtime_config(self) -> dict[str, object]:
+                return dict(self.runtime_config)
+
+            def save_runtime_config(self, config: dict[str, object]) -> None:
+                self.runtime_config = dict(config)
+
+            def health_check(self) -> dict[str, object]:
+                return {"status": "healthy"}
+
+            def get_backend_info(self) -> dict[str, object]:
+                return {"type": "memory"}
+
+        store = self.config_module.ConfigStore(Path("ignored-config.json"), storage_backend=MemoryStorage())
+        response = store.update(
+            {
+                "public_app_url": "https://image.example.com/",
+                "api_public_url": "",
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1/",
+                    "gateway_management_url": "",
+                    "token_name": "HappyImage Default",
+                },
+            }
+        )
+
+        self.assertEqual(response["public_app_url"], "https://image.example.com")
+        self.assertEqual(response["api_public_url"], "")
+        self.assertEqual(response["external_api_url"], "https://image.example.com")
+        self.assertEqual(response["model_gateway"]["gateway_api_base_url"], "https://gateway.happy-token.cn/v1")
+        self.assertEqual(response["model_gateway"]["gateway_management_url"], "https://gateway.happy-token.cn")
+
+    def test_service_runtime_settings_ignore_happytoken_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
             module = self.config_module
-            old_dotenv = module.DOTENV_FILE
             old_session_secret = module.os.environ.get("HAPPYTOKEN_SESSION_SECRET")
             old_frontend_base_url = module.os.environ.get("HAPPYTOKEN_FRONTEND_BASE_URL")
-            old_storage = module.os.environ.get("STORAGE_BACKEND")
             try:
-                module.DOTENV_FILE = dotenv_path
-                for key in [
-                    "HAPPYTOKEN_SESSION_SECRET",
-                    "HAPPYTOKEN_FRONTEND_BASE_URL",
-                    "STORAGE_BACKEND",
-                ]:
-                    module.os.environ.pop(key, None)
+                module.os.environ["HAPPYTOKEN_SESSION_SECRET"] = "env-session-secret"
+                module.os.environ["HAPPYTOKEN_FRONTEND_BASE_URL"] = "https://env.example.com"
 
-                module._load_prefixed_dotenv()
                 store = module.ConfigStore(Path(tmp_dir) / "config.json")
 
-                self.assertEqual(store.session_secret, "dotenv-session-secret")
-                self.assertEqual(store.frontend_base_url, "https://image.example.com")
-                self.assertIsNone(module.os.environ.get("STORAGE_BACKEND"))
+                self.assertEqual(store.session_secret, "")
+                self.assertEqual(store.public_app_url, "")
+                self.assertEqual(store.frontend_base_url, "")
             finally:
-                module.DOTENV_FILE = old_dotenv
                 for key, value in {
                     "HAPPYTOKEN_SESSION_SECRET": old_session_secret,
                     "HAPPYTOKEN_FRONTEND_BASE_URL": old_frontend_base_url,
-                    "STORAGE_BACKEND": old_storage,
                 }.items():
                     if value is None:
                         module.os.environ.pop(key, None)

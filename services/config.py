@@ -72,6 +72,22 @@ def _normalize_positive_int(value: object, default: int, minimum: int = 0) -> in
     return max(minimum, normalized)
 
 
+def _normalize_url(value: object) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def _normalize_gateway_api_url(value: object) -> str:
+    base = _normalize_url(value)
+    if not base:
+        return ""
+    return base if base.endswith("/v1") else f"{base}/v1"
+
+
+def _derive_gateway_management_url(api_url: str) -> str:
+    normalized = _normalize_url(api_url)
+    return normalized.removesuffix("/v1")
+
+
 def _getenv(name: str) -> str:
     value = str(os.getenv(name) or "").strip()
     if value or not name.startswith("HAPPYTOKEN_"):
@@ -179,16 +195,21 @@ def _load_settings() -> LoadedSettings:
 
 
 class ConfigStore:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, storage_backend: StorageBackend | None = None):
         self.path = path
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        self._storage_backend = storage_backend
         self.data = self._load()
-        self._storage_backend: StorageBackend | None = None
 
     def _load(self) -> dict[str, object]:
+        if self._storage_backend is not None:
+            return self._storage_backend.load_runtime_config()
         return _read_json_object(self.path, name="config.json")
 
     def _save(self) -> None:
+        if self._storage_backend is not None:
+            self._storage_backend.save_runtime_config(self.data)
+            return
         self.path.write_text(json.dumps(self.data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     @property
@@ -335,40 +356,36 @@ class ConfigStore:
         ).strip().rstrip("/")
 
     @property
+    def public_app_url(self) -> str:
+        return _normalize_url(self.data.get("public_app_url") or self.data.get("frontend_base_url"))
+
+    @property
+    def api_public_url(self) -> str:
+        return _normalize_url(self.data.get("api_public_url") or self.data.get("api_base_url"))
+
+    @property
+    def external_api_url(self) -> str:
+        return self.api_public_url or self.public_app_url
+
+    @property
     def frontend_base_url(self) -> str:
-        return str(
-            _getenv("HAPPYTOKEN_FRONTEND_BASE_URL")
-            or self.data.get("frontend_base_url")
-            or ""
-        ).strip().rstrip("/")
+        return self.public_app_url
 
     @property
     def api_base_url(self) -> str:
-        return str(
-            _getenv("HAPPYTOKEN_API_BASE_URL")
-            or self.data.get("api_base_url")
-            or self.base_url
-            or ""
-        ).strip().rstrip("/")
+        return self.external_api_url
 
     @property
     def cors_origins(self) -> list[str]:
-        env_value = _getenv("HAPPYTOKEN_CORS_ORIGINS")
-        if env_value:
-            return [origin.strip() for origin in env_value.split(",") if origin.strip()]
-        frontend = self.frontend_base_url
-        if frontend:
-            return [frontend]
         config_origins = self.data.get("cors_origins")
-        if isinstance(config_origins, list):
-            return [str(origin).strip() for origin in config_origins if str(origin).strip()]
-        return []
+        if isinstance(config_origins, list) and config_origins:
+            return [str(origin).strip().rstrip("/") for origin in config_origins if str(origin).strip()]
+        return [self.public_app_url] if self.public_app_url else []
 
     @property
     def session_secret(self) -> str:
         return str(
-            _getenv("HAPPYTOKEN_SESSION_SECRET")
-            or self.data.get("session_secret")
+            self.data.get("session_secret")
             or ""
         ).strip()
 
@@ -422,6 +439,9 @@ class ConfigStore:
         data["sensitive_words"] = self.sensitive_words
         data["ai_review"] = self.ai_review
         data["global_system_prompt"] = self.global_system_prompt
+        data["public_app_url"] = self.public_app_url
+        data["api_public_url"] = self.api_public_url
+        data["external_api_url"] = self.external_api_url
         data["frontend_base_url"] = self.frontend_base_url
         data["api_base_url"] = self.api_base_url
         data["cors_origins"] = self.cors_origins
@@ -431,6 +451,7 @@ class ConfigStore:
         data["session_secret_configured"] = bool(self.session_secret)
         data["oidc"] = _redact_oidc_secret(self.get_oidc_settings())
         data["image_storage"] = self.get_image_storage_settings()
+        data["model_gateway"] = self.get_model_gateway_settings()
         data.pop("auth-key", None)
         data.pop("session_secret", None)
         data.pop("model_gateway_api_key", None)
@@ -486,58 +507,45 @@ class ConfigStore:
     def get_oidc_settings(self) -> dict[str, object]:
         return _normalize_oidc_settings(self.data.get("oidc"))
 
-    def get_newapi_binding_settings(self) -> dict[str, object]:
-        source = self.data.get("newapi_binding") if isinstance(self.data.get("newapi_binding"), dict) else {}
-        base_url = (
-            _getenv("HAPPYTOKEN_NEWAPI_BASE_URL")
-            or _getenv("HAPPYIMAGE_NEWAPI_BASE_URL")
-            or str(source.get("base_url") or "")
-            or "https://gateway.happy-token.cn"
-        ).strip().rstrip("/")
-        management_url = (
-            _getenv("HAPPYTOKEN_NEWAPI_MANAGEMENT_URL")
-            or _getenv("HAPPYIMAGE_NEWAPI_MANAGEMENT_URL")
-            or str(source.get("management_url") or "")
-            or base_url
-        ).strip().rstrip("/")
-        provision_url = (
-            _getenv("HAPPYTOKEN_NEWAPI_PROVISION_URL")
-            or _getenv("HAPPYIMAGE_NEWAPI_PROVISION_URL")
-            or str(source.get("provision_url") or "")
-        ).strip()
-        provision_secret = (
-            _getenv("HAPPYTOKEN_NEWAPI_PROVISION_SECRET")
-            or _getenv("HAPPYIMAGE_NEWAPI_PROVISION_SECRET")
-            or str(source.get("provision_secret") or "")
-        ).strip()
-        token_name = (
-            _getenv("HAPPYTOKEN_NEWAPI_TOKEN_NAME")
-            or _getenv("HAPPYIMAGE_NEWAPI_TOKEN_NAME")
-            or str(source.get("token_name") or "")
-            or "HappyImage Default"
-        ).strip()[:80] or "HappyImage Default"
-        sql_dsn = (
-            _getenv("HAPPYTOKEN_NEWAPI_SQL_DSN")
-            or _getenv("HAPPYIMAGE_NEWAPI_SQL_DSN")
-            or str(source.get("sql_dsn") or "")
-        ).strip()
+    def get_model_gateway_settings(self) -> dict[str, object]:
+        source = self.data.get("model_gateway") if isinstance(self.data.get("model_gateway"), dict) else {}
+        api_url = _normalize_gateway_api_url(
+            source.get("gateway_api_base_url")
+            or source.get("base_url")
+            or "https://gateway.happy-token.cn/v1"
+        )
+        management_url = _normalize_url(source.get("gateway_management_url") or source.get("management_url"))
+        if not management_url:
+            management_url = _derive_gateway_management_url(api_url)
+        sql_dsn = str(source.get("sql_dsn") or "").strip()
+        provision_url = str(source.get("provision_url") or "").strip()
+        provision_secret = str(source.get("provision_secret") or "").strip()
+        token_name = (str(source.get("token_name") or "").strip() or "HappyImage Default")[:80]
         return {
-            "base_url": base_url,
+            "gateway_api_base_url": api_url,
+            "gateway_management_url": management_url,
+            "base_url": api_url,
             "management_url": management_url,
+            "sql_dsn": sql_dsn,
+            "sql_dsn_configured": bool(sql_dsn),
             "provision_url": provision_url,
             "provision_secret": provision_secret,
             "provision_secret_configured": bool(provision_secret),
-            "sql_dsn": sql_dsn,
-            "sql_dsn_configured": bool(sql_dsn),
             "token_name": token_name,
             "enabled": bool((provision_url and provision_secret) or sql_dsn),
         }
+
+    def get_newapi_binding_settings(self) -> dict[str, object]:
+        return self.get_model_gateway_settings()
 
     def get_storage_backend(self) -> StorageBackend:
         """获取存储后端实例（单例）"""
         if self._storage_backend is None:
             from services.storage.factory import create_storage_backend
             self._storage_backend = create_storage_backend(DATA_DIR)
+            if self is config:
+                self.data = self._load()
         return self._storage_backend
 
+config_storage_backend = None
 config = ConfigStore(CONFIG_FILE)

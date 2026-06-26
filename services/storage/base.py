@@ -28,6 +28,16 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
+    def load_runtime_config(self) -> dict[str, Any]:
+        """Load admin-managed runtime configuration."""
+        pass
+
+    @abstractmethod
+    def save_runtime_config(self, config: dict[str, Any]) -> None:
+        """Persist admin-managed runtime configuration."""
+        pass
+
+    @abstractmethod
     def health_check(self) -> dict[str, Any]:
         """健康检查，返回存储后端状态"""
         pass
