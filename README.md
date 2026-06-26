@@ -224,6 +224,25 @@ Docker 部署时，容器内 `/app/data` 会挂载到仓库目录下的 `./data`
 docker pull ghcr.io/happy-token/happyimage-api:latest
 ```
 
+如果使用工作区根目录的 Web + API 组合部署，默认会同时拉取：
+
+```bash
+docker pull ghcr.io/happy-token/happyimage-api:latest
+docker pull ghcr.io/happy-token/happyimage-web:latest
+
+cd /opt/happytoken/happyimage
+mkdir -p data/api data/seed-gallery
+test -f data/config.json || cp happyimage-api/config.example.json data/config.json
+docker compose -f deploy/hs/docker-compose.yml pull
+docker compose -f deploy/hs/docker-compose.yml up -d
+```
+
+如果 GHCR package 不是公开可读，需要先在目标机器登录：
+
+```bash
+docker login ghcr.io
+```
+
 当前 workflow 位于 `.github/workflows/docker-publish.yml`，支持 `linux/amd64` 和 `linux/arm64`。打 `v*` tag 时会额外发布版本标签。
 
 Dockerfile 使用 China-friendly mirrors：
