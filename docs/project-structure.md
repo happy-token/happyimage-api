@@ -30,7 +30,7 @@ Shared helpers in `utils/` should avoid importing from `api/` or high-level serv
 
 ## Configuration and Runtime Data
 
-Use `.env` for deployment-specific values such as secrets, public URLs, proxy settings, and storage credentials. Use `config.json` or the Web settings API for application settings that operators may change over time.
+Use `.env` only for infrastructure values such as `STORAGE_BACKEND`, `DATABASE_URL`, host ports, image names, and build-image overrides. Runtime application settings live in `config.json`, first-run `/setup`, or admin `/settings`: `public_app_url`, `api_public_url`, session/cookie fields, OAuth/OIDC, model gateway/NewAPI binding, proxy, image storage, and safety settings.
 
 Runtime data lives under `data/`. Generated logs, images, task state, databases, local caches, and exported official-gallery static packages should remain untracked.
 
