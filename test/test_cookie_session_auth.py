@@ -137,10 +137,6 @@ def test_password_login_sets_cookie_and_cookie_authenticates_admin_api():
             assert settings_response.status_code == 200, settings_response.text
             assert "config" in settings_response.json()
 
-            models_response = client.get("/v1/models")
-
-            assert models_response.status_code == 200, models_response.text
-
 
 def test_session_accepts_bearer_token_when_cookie_is_missing():
     with _runtime_config():

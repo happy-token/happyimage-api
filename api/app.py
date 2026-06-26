@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-from api import ai, auth_oidc, image_conversations, image_tasks, seed_gallery, share_drafts, system
+from api import auth_oidc, image_conversations, image_tasks, seed_gallery, share_drafts, system
 from api.errors import install_exception_handlers
 from api.support import reset_current_request, resolve_web_asset, set_current_request
 from services.config import config
@@ -78,7 +78,6 @@ def create_app() -> FastAPI:
             allow_methods=["*"],
             allow_headers=["*"],
         )
-    app.include_router(ai.create_router())
     app.include_router(auth_oidc.create_router())
     app.include_router(image_conversations.create_router())
     app.include_router(image_tasks.create_router())
