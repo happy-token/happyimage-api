@@ -84,6 +84,20 @@ class RegisterRequest(BaseModel):
     confirm_password: str = ""
 
 
+class SetupRequest(BaseModel):
+    admin_name: str = ""
+    admin_key: str = ""
+    public_app_url: str = ""
+    api_public_url: str = ""
+    session_secret: str = ""
+    oidc: dict[str, object] = {}
+    model_gateway: dict[str, object] = {}
+
+
+class AdminKeyLoginRequest(BaseModel):
+    key: str = ""
+
+
 class UserProfileUpdateRequest(BaseModel):
     watermark_label: str | None = None
     model_provider: str | None = None
@@ -314,6 +328,34 @@ def _local_password_login_enabled() -> bool:
     return enabled in {"1", "true", "yes", "on"}
 
 
+def _admin_exists() -> bool:
+    return bool(auth_service.list_keys("admin"))
+
+
+def _setup_status_payload() -> dict[str, object]:
+    return {
+        "ok": True,
+        "setup_required": not _admin_exists(),
+        "storage": config.get_storage_backend().get_backend_info(),
+    }
+
+
+def _normalize_setup_config(body: SetupRequest) -> dict[str, object]:
+    public_app_url = body.public_app_url.strip().rstrip("/")
+    if public_app_url and not public_app_url.startswith(("http://", "https://")):
+        raise ValueError("公开应用地址必须以 http:// 或 https:// 开头")
+    session_secret = body.session_secret.strip()
+    if len(session_secret) < 32:
+        raise ValueError("Session Secret 至少需要 32 个字符")
+    return {
+        "public_app_url": public_app_url,
+        "api_public_url": body.api_public_url.strip().rstrip("/"),
+        "session_secret": session_secret,
+        "oidc": body.oidc,
+        "model_gateway": body.model_gateway,
+    }
+
+
 def _normalize_register_name(body: RegisterRequest) -> str:
     name = (body.name or body.email or "").strip()
     if len(name) < 2:
@@ -413,6 +455,48 @@ def create_router(app_version: str) -> APIRouter:
             except HTTPException:
                 pass
         raise HTTPException(status_code=401, detail={"error": "账号或密码不正确"})
+
+    @router.get("/api/setup/status")
+    async def get_setup_status():
+        return _setup_status_payload()
+
+    @router.post("/api/setup")
+    async def complete_setup(body: SetupRequest):
+        if _admin_exists():
+            raise HTTPException(status_code=403, detail={"error": "初始化已完成"})
+        admin_key = body.admin_key.strip()
+        if len(admin_key) < 8:
+            raise HTTPException(
+                status_code=400, detail={"error": "管理员密钥至少需要 8 个字符"}
+            )
+        try:
+            next_config = _normalize_setup_config(body)
+            config_response = config.update(next_config)
+            admin = await run_in_threadpool(
+                auth_service.create_key_with_value,
+                role="admin",
+                name=body.admin_name.strip() or "管理员",
+                key=admin_key,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        return {
+            "ok": True,
+            "setup_required": False,
+            "admin": admin,
+            "config": config_response,
+        }
+
+    @router.post("/api/auth/admin-key-login")
+    async def admin_key_login(request: Request, body: AdminKeyLoginRequest):
+        _check_auth_rate_limit(request, "admin_key_login", "admin")
+        key = body.key.strip()
+        if not key:
+            raise HTTPException(status_code=400, detail={"error": "请输入管理员密钥"})
+        identity = auth_service.authenticate(key)
+        if identity is None or identity.get("role") != "admin":
+            raise HTTPException(status_code=401, detail={"error": "管理员密钥无效"})
+        return _auth_login_response(identity, key, app_version)
 
     @router.post("/api/auth/register")
     async def register_user(request: Request, body: RegisterRequest):
