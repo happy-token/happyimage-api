@@ -152,11 +152,13 @@ class WebSessionService:
 
     @staticmethod
     def _cookie_uses_secure() -> bool:
-        return config.api_base_url.startswith("https://")
+        return config.external_api_url.startswith(
+            "https://"
+        ) or config.public_app_url.startswith("https://")
 
     @classmethod
     def _cookie_same_site(cls) -> str:
-        frontend = config.frontend_base_url
+        frontend = config.public_app_url
         frontend_scheme = urlparse(frontend).scheme if frontend else ""
         if not cls._cookie_uses_secure() or frontend_scheme != "https":
             return "Lax"

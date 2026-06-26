@@ -42,7 +42,7 @@ class ProviderTestRequest(BaseModel):
 
 
 def _request_external_base_url(request: Request) -> str:
-    configured = config.api_base_url
+    configured = config.external_api_url
     if configured:
         return configured
     proto = (
@@ -372,7 +372,7 @@ def create_router() -> APIRouter:
         _token, cookie = _create_session_with_identity_fields(identity)
 
         # Redirect to frontend
-        frontend_base = config.frontend_base_url or "/"
+        frontend_base = config.public_app_url or "/"
         next_path = oidc_claims.get("next_path", "") or "/image"
         if not next_path.startswith("/"):
             next_path = "/image"

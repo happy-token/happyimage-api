@@ -195,7 +195,7 @@ class OIDCService:
 
     @staticmethod
     def _make_callback_url(api_base_url: str = "") -> str:
-        api_base = str(api_base_url or config.api_base_url or "").strip().rstrip("/")
+        api_base = str(api_base_url or config.external_api_url or "").strip().rstrip("/")
         if api_base:
             return f"{api_base}/api/auth/oidc/callback"
         return "/api/auth/oidc/callback"

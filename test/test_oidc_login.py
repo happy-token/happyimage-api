@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 import api.auth_oidc as auth_oidc_api
 from services.config import config
@@ -23,6 +25,7 @@ def _oidc_settings(**overrides: object) -> dict[str, object]:
     return values
 
 
+@contextmanager
 def _runtime_config(**overrides: object):
     values: dict[str, object] = {
         "session_secret": "oidc-session-secret",
@@ -30,7 +33,37 @@ def _runtime_config(**overrides: object):
         "oidc": _oidc_settings(),
     }
     values.update(overrides)
-    return mock.patch.dict(config.data, values, clear=False)
+    previous_data = dict(config.data)
+    with mock.patch.object(config, "_save"):
+        config.data = {}
+        config.update(values)
+        try:
+            yield
+        finally:
+            config.data = previous_data
+
+
+def _request(
+    *,
+    scheme: str = "http",
+    host: str = "request.example.com",
+    forwarded_proto: str = "",
+    forwarded_host: str = "",
+) -> Request:
+    headers = [(b"host", host.encode("ascii"))]
+    if forwarded_proto:
+        headers.append((b"x-forwarded-proto", forwarded_proto.encode("ascii")))
+    if forwarded_host:
+        headers.append((b"x-forwarded-host", forwarded_host.encode("ascii")))
+    return Request(
+        {
+            "type": "http",
+            "scheme": scheme,
+            "server": (host.split(":", 1)[0], 80),
+            "path": "/api/auth/oidc/start",
+            "headers": headers,
+        }
+    )
 
 
 def test_oidc_authorize_and_callback_reuse_absolute_redirect_uri():
@@ -81,6 +114,43 @@ def test_oidc_authorize_and_callback_reuse_absolute_redirect_uri():
         )
         assert claims["sub"] == "oidc-sub"
         assert claims["email"] == "creator@example.com"
+
+
+def test_oidc_callback_base_url_prefers_external_api_url_runtime_setting():
+    with _runtime_config(
+        public_app_url="https://web.example.com",
+        api_public_url="https://api.config.example.com",
+    ):
+        assert (
+            auth_oidc_api._request_external_base_url(
+                _request(
+                    scheme="http",
+                    host="internal.example.com",
+                    forwarded_proto="https",
+                    forwarded_host="proxy.example.com",
+                )
+            )
+            == "https://api.config.example.com"
+        )
+        assert (
+            OIDCService._make_callback_url()
+            == "https://api.config.example.com/api/auth/oidc/callback"
+        )
+
+
+def test_oidc_callback_base_url_falls_back_to_forwarded_request_host():
+    with _runtime_config(public_app_url="", api_public_url=""):
+        assert (
+            auth_oidc_api._request_external_base_url(
+                _request(
+                    scheme="http",
+                    host="internal.example.com",
+                    forwarded_proto="https",
+                    forwarded_host="proxy.example.com",
+                )
+            )
+            == "https://proxy.example.com"
+        )
 
 
 def test_oidc_callback_session_cookie_contains_external_identity():
@@ -502,6 +572,19 @@ def test_logout_clear_cookie_matches_cross_site_secure_cookie_attributes():
     assert "happytoken_session=" in cookie
     assert "Max-Age=0" in cookie
     assert "Expires=Thu, 01 Jan 1970 00:00:00 GMT" in cookie
+    assert "Secure" in cookie
+    assert "SameSite=None" in cookie
+
+
+def test_logout_clear_cookie_is_secure_when_public_app_url_is_https():
+    app = FastAPI()
+    app.include_router(auth_oidc_api.create_router())
+
+    with _runtime_config(api_public_url="", public_app_url="https://web.example.com"):
+        response = TestClient(app).post("/api/auth/logout")
+
+    assert response.status_code == 200, response.text
+    cookie = response.headers["set-cookie"]
     assert "Secure" in cookie
     assert "SameSite=None" in cookie
 

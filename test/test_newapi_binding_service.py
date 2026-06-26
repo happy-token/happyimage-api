@@ -55,6 +55,28 @@ def test_newapi_binding_settings_use_model_gateway_config_and_ignore_env(tmp_pat
     assert settings["enabled"] is True
 
 
+def test_newapi_binding_settings_remove_v1_from_management_url(tmp_path):
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "model_gateway": {
+                    "gateway_api_base_url": "https://config-gateway.example.com/v1/",
+                    "gateway_management_url": "https://config-admin.example.com/v1/",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    settings = ConfigStore(config_path).get_newapi_binding_settings()
+
+    assert settings["gateway_api_base_url"] == "https://config-gateway.example.com/v1"
+    assert settings["gateway_management_url"] == "https://config-admin.example.com"
+    assert settings["base_url"] == "https://config-gateway.example.com/v1"
+    assert settings["management_url"] == "https://config-admin.example.com"
+
+
 def test_newapi_binding_settings_use_legacy_newapi_binding_config(tmp_path):
     config_path = tmp_path / "config.json"
     config_path.write_text(
@@ -323,8 +345,10 @@ class FakeSQLConnection:
 def _enabled_settings() -> dict[str, object]:
     return {
         "enabled": True,
-        "base_url": "https://gateway.happy-token.cn/",
-        "management_url": "https://gateway.happy-token.cn/manage/",
+        "gateway_api_base_url": "https://gateway.happy-token.cn/",
+        "gateway_management_url": "https://gateway.happy-token.cn/manage/",
+        "base_url": "https://legacy-gateway.example.com/",
+        "management_url": "https://legacy-admin.example.com/",
         "provision_url": "http://newapi:3000/api/internal/happyimage/bind-token",
         "provision_secret": "provision-secret",
         "provision_secret_configured": True,
@@ -371,6 +395,54 @@ def test_newapi_binding_returns_pending_when_disabled_or_unconfigured():
     assert result["status"] == "pending"
     assert result["base_url"] == "https://gateway.happy-token.cn/v1"
     assert result["management_url"] == "https://gateway.happy-token.cn/manage"
+
+
+def test_newapi_binding_prefers_unified_gateway_url_names_over_aliases():
+    service = NewAPIBindingService(
+        settings={
+            "enabled": False,
+            "gateway_api_base_url": "https://unified-gateway.example.com/",
+            "gateway_management_url": "https://unified-admin.example.com/v1/",
+            "base_url": "https://legacy-gateway.example.com/",
+            "management_url": "https://legacy-admin.example.com/",
+            "provision_url": "",
+            "provision_secret": "",
+        },
+        session_factory=lambda: FakeSession(),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result["base_url"] == "https://unified-gateway.example.com/v1"
+    assert result["management_url"] == "https://unified-admin.example.com"
+
+
+def test_newapi_binding_preserves_legacy_gateway_url_aliases():
+    service = NewAPIBindingService(
+        settings={
+            "enabled": False,
+            "base_url": "https://legacy-gateway.example.com/",
+            "management_url": "https://legacy-admin.example.com/v1/",
+            "provision_url": "",
+            "provision_secret": "",
+        },
+        session_factory=lambda: FakeSession(),
+    )
+
+    result = service.ensure_default_token(
+        provider="casdoor",
+        subject="casdoor-sub",
+        email="creator@example.com",
+        name="Creator",
+    )
+
+    assert result["base_url"] == "https://legacy-gateway.example.com/v1"
+    assert result["management_url"] == "https://legacy-admin.example.com"
 
 
 def test_newapi_binding_direct_sql_reuses_existing_user_and_token():
@@ -482,8 +554,8 @@ def test_newapi_binding_pending_management_url_falls_back_to_base_url():
     service = NewAPIBindingService(
         settings={
             "enabled": False,
-            "base_url": "https://custom.example/v1/",
-            "management_url": "",
+            "gateway_api_base_url": "https://custom.example/v1/",
+            "gateway_management_url": "",
             "provision_url": "",
             "provision_secret": "",
         },
@@ -498,7 +570,7 @@ def test_newapi_binding_pending_management_url_falls_back_to_base_url():
     )
 
     assert result["base_url"] == "https://custom.example/v1"
-    assert result["management_url"] == "https://custom.example/v1"
+    assert result["management_url"] == "https://custom.example"
 
 
 def test_newapi_binding_calls_configured_provisioning_endpoint_with_auth_and_payload():

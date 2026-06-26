@@ -100,6 +100,10 @@ def _derive_gateway_management_url(api_url: str) -> str:
     return normalized.removesuffix("/v1")
 
 
+def _normalize_gateway_management_url(value: object) -> str:
+    return _normalize_url(value).removesuffix("/v1")
+
+
 def _getenv(name: str) -> str:
     value = str(os.getenv(name) or "").strip()
     if value or not name.startswith("HAPPYTOKEN_"):
@@ -556,7 +560,9 @@ class ConfigStore:
             or source.get("base_url")
             or "https://gateway.happy-token.cn/v1"
         )
-        management_url = _normalize_url(source.get("gateway_management_url") or source.get("management_url"))
+        management_url = _normalize_gateway_management_url(
+            source.get("gateway_management_url") or source.get("management_url")
+        )
         if not management_url:
             management_url = _derive_gateway_management_url(api_url)
         provision_url = str(source.get("provision_url") or "").strip()
