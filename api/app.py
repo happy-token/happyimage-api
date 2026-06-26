@@ -85,6 +85,19 @@ def create_app() -> FastAPI:
     app.include_router(share_drafts.create_router())
     app.include_router(system.create_router(app_version))
 
+    @app.api_route(
+        "/v1",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    @app.api_route(
+        "/v1/{full_path:path}",
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    async def removed_v1_routes(full_path: str = ""):
+        raise HTTPException(status_code=404, detail="Not Found")
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_web(full_path: str):
         asset = resolve_web_asset(full_path)

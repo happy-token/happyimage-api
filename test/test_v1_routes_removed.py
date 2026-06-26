@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import create_app
 
 
-def test_v1_models_route_is_removed():
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("GET", "/v1"),
+        ("POST", "/v1"),
+        ("GET", "/v1/models"),
+        ("POST", "/v1/images/generations"),
+        ("POST", "/v1/images/edits"),
+        ("POST", "/v1/chat/completions"),
+        ("POST", "/v1/messages"),
+        ("POST", "/v1/responses"),
+    ],
+)
+def test_v1_routes_are_removed(method: str, path: str):
     with TestClient(create_app()) as client:
-        response = client.get("/v1/models")
+        response = client.request(method, path)
 
     assert response.status_code == 404
