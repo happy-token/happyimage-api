@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 import sys
 from pathlib import Path
 import time
@@ -14,7 +13,6 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
 VERSION_FILE = BASE_DIR / "VERSION"
-DOTENV_FILE = BASE_DIR / ".env"
 
 DEFAULT_IMAGE_STORAGE = {
     "enabled": False,
@@ -25,32 +23,6 @@ DEFAULT_IMAGE_STORAGE = {
     "webdav_root_path": "happytoken/images",
     "public_base_url": "",
 }
-
-
-def _load_prefixed_dotenv() -> None:
-    if not DOTENV_FILE.exists() or not DOTENV_FILE.is_file():
-        return
-    try:
-        lines = DOTENV_FILE.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return
-    for line in lines:
-        raw = line.strip()
-        if not raw or raw.startswith("#") or "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        if not key.startswith(("HAPPYTOKEN_", "HAPPYIMAGE_")):
-            continue
-        if key in os.environ:
-            continue
-        value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
-            value = value[1:-1]
-        os.environ[key] = value
-
-
-_load_prefixed_dotenv()
 
 
 def _normalize_bool(value: object, default: bool = False) -> bool:
@@ -102,14 +74,6 @@ def _derive_gateway_management_url(api_url: str) -> str:
 
 def _normalize_gateway_management_url(value: object) -> str:
     return _normalize_url(value).removesuffix("/v1")
-
-
-def _getenv(name: str) -> str:
-    value = str(os.getenv(name) or "").strip()
-    if value or not name.startswith("HAPPYTOKEN_"):
-        return value
-    legacy_name = "HAPPYIMAGE_" + name.removeprefix("HAPPYTOKEN_")
-    return str(os.getenv(legacy_name) or "").strip()
 
 
 def _normalize_image_storage_settings(value: object) -> dict[str, object]:

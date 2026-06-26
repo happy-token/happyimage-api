@@ -30,12 +30,12 @@ def test_newapi_binding_settings_use_model_gateway_config_and_ignore_env(tmp_pat
     with mock.patch.dict(
         "os.environ",
         {
-            "HAPPYTOKEN_NEWAPI_BASE_URL": "https://env-gateway.example.com/",
-            "HAPPYTOKEN_NEWAPI_MANAGEMENT_URL": "https://env-admin.example.com",
-            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "http://env-newapi:3000/bind-token",
-            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "env-secret",
-            "HAPPYTOKEN_NEWAPI_TOKEN_NAME": "Env Token",
-            "HAPPYTOKEN_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
+            "UNUSED_NEWAPI_BASE_URL": "https://env-gateway.example.com/",
+            "UNUSED_NEWAPI_MANAGEMENT_URL": "https://env-admin.example.com",
+            "UNUSED_NEWAPI_PROVISION_URL": "http://env-newapi:3000/bind-token",
+            "UNUSED_NEWAPI_PROVISION_SECRET": "env-secret",
+            "UNUSED_NEWAPI_TOKEN_NAME": "Env Token",
+            "UNUSED_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
         },
         clear=False,
     ):
@@ -98,9 +98,9 @@ def test_newapi_binding_settings_use_legacy_newapi_binding_config(tmp_path):
     with mock.patch.dict(
         "os.environ",
         {
-            "HAPPYTOKEN_NEWAPI_BASE_URL": "https://env-gateway.example.com/",
-            "HAPPYIMAGE_NEWAPI_MANAGEMENT_URL": "https://env-admin.example.com",
-            "HAPPYIMAGE_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
+            "UNUSED_NEWAPI_BASE_URL": "https://env-gateway.example.com/",
+            "UNUSED_NEWAPI_MANAGEMENT_URL": "https://env-admin.example.com",
+            "UNUSED_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
         },
         clear=False,
     ):
@@ -124,10 +124,10 @@ def test_newapi_binding_settings_ignore_env_when_config_empty(tmp_path):
     with mock.patch.dict(
         "os.environ",
         {
-            "HAPPYTOKEN_NEWAPI_PROVISION_URL": "http://env-newapi:3000/bind-token",
-            "HAPPYTOKEN_NEWAPI_PROVISION_SECRET": "env-secret",
-            "HAPPYTOKEN_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
-            "HAPPYIMAGE_NEWAPI_BASE_URL": "https://legacy-env-gateway.example.com",
+            "UNUSED_NEWAPI_PROVISION_URL": "http://env-newapi:3000/bind-token",
+            "UNUSED_NEWAPI_PROVISION_SECRET": "env-secret",
+            "UNUSED_NEWAPI_SQL_DSN": "postgresql://env:secret@db/new-api",
+            "UNUSED_NEWAPI_BASE_URL": "https://legacy-env-gateway.example.com",
         },
         clear=False,
     ):

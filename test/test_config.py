@@ -735,28 +735,25 @@ class ConfigLoadingTests(unittest.TestCase):
             with self.assertRaises(json.JSONDecodeError):
                 self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=backend)
 
-    def test_service_runtime_settings_ignore_happytoken_environment(self) -> None:
+    def test_service_runtime_settings_ignore_runtime_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             module = self.config_module
             env_values = {
-                "HAPPYTOKEN_BASE_URL": "https://env-base.example.com",
-                "HAPPYTOKEN_FRONTEND_BASE_URL": "https://env.example.com",
-                "HAPPYTOKEN_SESSION_SECRET": "env-session-secret",
-                "HAPPYTOKEN_SESSION_COOKIE_NAME": "env_cookie",
-                "HAPPYTOKEN_SESSION_MAX_AGE_SECONDS": "12345",
-                "HAPPYTOKEN_SESSION_COOKIE_DOMAIN": "env.example.com",
-                "HAPPYTOKEN_PROXY": "http://proxy.example.com",
-                "HAPPYTOKEN_OIDC_ENABLED": "true",
-                "HAPPYTOKEN_OIDC_ISSUER": "https://issuer.example.com",
-                "HAPPYTOKEN_OIDC_CLIENT_ID": "env-client-id",
-                "HAPPYTOKEN_OIDC_CLIENT_SECRET": "env-client-secret",
-                "HAPPYTOKEN_OIDC_SCOPES": "openid email",
-                "HAPPYTOKEN_OIDC_ALLOWED_EMAIL_DOMAINS": "example.com",
+                "UNUSED_RUNTIME_BASE_URL": "https://env-base.example.com",
+                "UNUSED_RUNTIME_PUBLIC_APP_URL": "https://env.example.com",
+                "UNUSED_RUNTIME_SESSION_SECRET": "env-session-secret",
+                "UNUSED_RUNTIME_SESSION_COOKIE_NAME": "env_cookie",
+                "UNUSED_RUNTIME_SESSION_MAX_AGE_SECONDS": "12345",
+                "UNUSED_RUNTIME_SESSION_COOKIE_DOMAIN": "env.example.com",
+                "UNUSED_RUNTIME_PROXY": "http://proxy.example.com",
+                "UNUSED_RUNTIME_OIDC_ENABLED": "true",
+                "UNUSED_RUNTIME_OIDC_ISSUER": "https://issuer.example.com",
+                "UNUSED_RUNTIME_OIDC_CLIENT_ID": "env-client-id",
+                "UNUSED_RUNTIME_OIDC_CLIENT_SECRET": "env-client-secret",
+                "UNUSED_RUNTIME_OIDC_SCOPES": "openid email",
+                "UNUSED_RUNTIME_OIDC_ALLOWED_EMAIL_DOMAINS": "example.com",
             }
-            old_env = {key: module.os.environ.get(key) for key in env_values}
-            try:
-                module.os.environ.update(env_values)
-
+            with mock.patch.dict("os.environ", env_values, clear=False):
                 store = module.ConfigStore(Path(tmp_dir) / "config.json")
 
                 self.assertEqual(store.base_url, "")
@@ -778,12 +775,6 @@ class ConfigLoadingTests(unittest.TestCase):
                         "allowed_email_domains": "",
                     },
                 )
-            finally:
-                for key, value in old_env.items():
-                    if value is None:
-                        module.os.environ.pop(key, None)
-                    else:
-                        module.os.environ[key] = value
 
 
 if __name__ == "__main__":

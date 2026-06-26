@@ -99,6 +99,16 @@ uv run pytest -m live
 
 默认本地或测试启动只需要复制 `config.example.json` 为 `config.json`。`.env` 不是必需文件。
 
+`STORAGE_BACKEND` 等基础设施变量由 Docker Compose 传递给容器。可以临时写在命令前：
+
+```bash
+STORAGE_BACKEND=postgres \
+DATABASE_URL=postgresql://user:password@postgres.example.com:5432/happyimage \
+docker compose up -d
+```
+
+也可以放在执行 `docker compose` 的目录里的 `.env` 文件中。API-only 部署是在 `happyimage-api/.env`；工作区组合部署是在工作区根目录 `.env`。
+
 部署环境变量只保留基础设施项：
 
 | 变量 | 说明 |

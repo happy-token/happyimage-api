@@ -24,6 +24,7 @@ scripts/test_proxies.py
 # Environment variables
 .env
 .env.local
+.env.backup-*
 
 # Database files
 *.db
