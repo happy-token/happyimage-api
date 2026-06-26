@@ -17,7 +17,6 @@
 | 文件 | 用途 |
 |:--|:--|
 | `docker-compose.yml` | 默认 API 服务配置，宿主机端口 `8000` 映射到容器 `80` |
-| `deploy/hs/docker-compose.yml` | Web + API 组合部署编排，已纳入 API 仓库版本控制 |
 | `.env.example` | 基础设施环境变量模板，复制为 `.env` 后填写本机或服务器配置 |
 | `config.example.json` | 应用运行时配置模板，复制为 `config.json` 后可在设置页继续维护 |
 | `data/` | 运行数据目录，包含用户、日志、图片任务和缓存图片 |
