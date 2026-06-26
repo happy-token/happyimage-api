@@ -72,11 +72,10 @@ class JSONStorageBackend(StorageBackend):
     def load_runtime_config(self) -> dict[str, Any]:
         if not self.runtime_config_path.exists():
             return {}
-        try:
-            data = json.loads(self.runtime_config_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {}
-        return data if isinstance(data, dict) else {}
+        data = json.loads(self.runtime_config_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("runtime config must be a JSON object")
+        return data
 
     def runtime_config_exists(self) -> bool:
         return self.runtime_config_path.exists()

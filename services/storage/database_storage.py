@@ -86,9 +86,9 @@ class DatabaseStorageBackend(StorageBackend):
             if row is None:
                 return {}
             data = json.loads(row.data)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
+            if not isinstance(data, dict):
+                raise ValueError("runtime config must be a JSON object")
+            return data
         finally:
             session.close()
 

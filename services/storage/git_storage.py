@@ -121,7 +121,11 @@ class GitStorageBackend(StorageBackend):
 
     def load_runtime_config(self) -> dict[str, Any]:
         data = self._load_json_value(self.runtime_config_file_path)
-        return data if isinstance(data, dict) else {}
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            raise ValueError("runtime config must be a JSON object")
+        return data
 
     def runtime_config_exists(self) -> bool:
         repo = self._clone_or_pull()

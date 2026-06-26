@@ -449,6 +449,23 @@ class ConfigLoadingTests(unittest.TestCase):
             self.assertEqual(store.public_app_url, "")
             self.assertEqual(json.loads(runtime_config_path.read_text(encoding="utf-8")), {})
 
+    def test_malformed_json_runtime_config_raises_instead_of_loading_empty_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            runtime_config_path = tmp_path / "runtime_config.json"
+            runtime_config_path.write_text("{not valid json", encoding="utf-8")
+
+            from services.storage.json_storage import JSONStorageBackend
+
+            backend = JSONStorageBackend(
+                tmp_path / "accounts.json",
+                tmp_path / "auth_keys.json",
+                runtime_config_path,
+            )
+
+            with self.assertRaises(json.JSONDecodeError):
+                self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=backend)
+
     def test_config_store_uses_json_storage_backend_for_runtime_settings(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             tmp_path = Path(tmp_dir)
@@ -491,6 +508,25 @@ class ConfigLoadingTests(unittest.TestCase):
             )
 
             self.assertEqual(reloaded.public_app_url, "https://sqlite.example.com")
+
+    def test_malformed_database_runtime_config_raises_instead_of_loading_empty_config(self) -> None:
+        try:
+            from services.storage.database_storage import DatabaseStorageBackend, RuntimeConfigModel
+        except ImportError as exc:
+            self.skipTest(f"database storage dependencies unavailable: {exc}")
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            backend = DatabaseStorageBackend(f"sqlite:///{tmp_path / 'runtime.db'}")
+            session = backend.Session()
+            try:
+                session.add(RuntimeConfigModel(key="default", data="{not valid json"))
+                session.commit()
+            finally:
+                session.close()
+
+            with self.assertRaises(json.JSONDecodeError):
+                self.config_module.ConfigStore(tmp_path / "config.json", storage_backend=backend)
 
     def test_service_runtime_settings_ignore_happytoken_environment(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
