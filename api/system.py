@@ -358,7 +358,8 @@ def _normalize_setup_url(value: object, label: str, *, required: bool = False) -
         return ""
     if len(normalized) > 512:
         raise ValueError(f"{label} 不能超过 512 个字符")
-    if not normalized.startswith(("http://", "https://")):
+    parsed = urlsplit(normalized)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError(f"{label} 必须以 http:// 或 https:// 开头")
     return normalized
 
@@ -372,7 +373,9 @@ def _normalize_setup_config(body: SetupRequest) -> dict[str, object]:
     model_gateway = dict(body.model_gateway) if isinstance(body.model_gateway, dict) else {}
     for key, label in (
         ("gateway_api_base_url", "模型网关 API 地址"),
+        ("base_url", "模型网关 API 地址"),
         ("gateway_management_url", "模型网关管理地址"),
+        ("management_url", "模型网关管理地址"),
         ("provision_url", "模型网关开通地址"),
     ):
         if key in model_gateway:

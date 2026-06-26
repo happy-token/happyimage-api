@@ -241,6 +241,49 @@ class SetupAPITests(unittest.TestCase):
         self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
         self.assertEqual(self.test_auth.list_keys("admin"), [])
 
+    def test_setup_rejects_bare_public_url_scheme(self) -> None:
+        client = self.make_client()
+
+        response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+
+    def test_setup_rejects_bare_api_public_url_scheme(self) -> None:
+        client = self.make_client()
+
+        response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "api_public_url": "http://",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "gateway_api_base_url": "https://gateway.happy-token.cn/v1"
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+
     def test_setup_rejects_invalid_gateway_url(self) -> None:
         client = self.make_client()
 
@@ -254,6 +297,28 @@ class SetupAPITests(unittest.TestCase):
                 "oidc": {"enabled": False},
                 "model_gateway": {
                     "gateway_api_base_url": "javascript:alert(1)",
+                },
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("http:// 或 https://", response.json()["detail"]["error"])
+        self.assertEqual(self.test_auth.list_keys("admin"), [])
+
+    def test_setup_rejects_bare_gateway_alias_urls(self) -> None:
+        client = self.make_client()
+
+        response = client.post(
+            "/api/setup",
+            json={
+                "admin_name": "Owner",
+                "admin_key": "owner-secret-key",
+                "public_app_url": "https://image.example.com",
+                "session_secret": "session-secret-with-at-least-32-characters",
+                "oidc": {"enabled": False},
+                "model_gateway": {
+                    "base_url": "https://",
+                    "management_url": "http://",
                 },
             },
         )
