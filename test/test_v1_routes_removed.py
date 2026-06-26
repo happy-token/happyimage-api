@@ -11,7 +11,13 @@ from api.app import create_app
     [
         ("GET", "/v1"),
         ("POST", "/v1"),
+        ("HEAD", "/v1"),
+        ("TRACE", "/v1"),
+        ("CONNECT", "/v1"),
         ("GET", "/v1/models"),
+        ("HEAD", "/v1/models"),
+        ("TRACE", "/v1/models"),
+        ("CONNECT", "/v1/models"),
         ("POST", "/v1/images/generations"),
         ("POST", "/v1/images/edits"),
         ("POST", "/v1/chat/completions"),

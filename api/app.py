@@ -5,7 +5,7 @@ from threading import Event
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from api import auth_oidc, image_conversations, image_tasks, seed_gallery, share_drafts, system
 from api.errors import install_exception_handlers
@@ -47,7 +47,11 @@ def create_app() -> FastAPI:
     async def add_security_headers(request, call_next):
         request_token = set_current_request(request)
         try:
-            response = await call_next(request)
+            path = request.url.path
+            if path == "/v1" or path.startswith("/v1/"):
+                response = JSONResponse(status_code=404, content={"detail": "Not Found"})
+            else:
+                response = await call_next(request)
         finally:
             reset_current_request(request_token)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
@@ -84,19 +88,6 @@ def create_app() -> FastAPI:
     app.include_router(seed_gallery.create_router())
     app.include_router(share_drafts.create_router())
     app.include_router(system.create_router(app_version))
-
-    @app.api_route(
-        "/v1",
-        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        include_in_schema=False,
-    )
-    @app.api_route(
-        "/v1/{full_path:path}",
-        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        include_in_schema=False,
-    )
-    async def removed_v1_routes(full_path: str = ""):
-        raise HTTPException(status_code=404, detail="Not Found")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_web(full_path: str):
