@@ -376,7 +376,7 @@ class ConfigStore:
 
     @property
     def api_public_url(self) -> str:
-        return _normalize_url(self.data.get("api_public_url") or self.data.get("api_base_url"))
+        return _normalize_url(self.data.get("api_public_url") or self.data.get("api_base_url") or self.data.get("base_url"))
 
     @property
     def external_api_url(self) -> str:

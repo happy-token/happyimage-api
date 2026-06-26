@@ -122,6 +122,20 @@ class ConfigLoadingTests(unittest.TestCase):
         self.assertEqual(response["model_gateway"]["gateway_api_base_url"], "https://gateway.happy-token.cn/v1")
         self.assertEqual(response["model_gateway"]["gateway_management_url"], "https://gateway.happy-token.cn")
 
+    def test_legacy_base_url_is_api_public_url_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            config_path = Path(tmp_dir) / "config.json"
+            config_path.write_text(
+                json.dumps({"base_url": "https://legacy-api.example.com/"}),
+                encoding="utf-8",
+            )
+
+            store = self.config_module.ConfigStore(config_path)
+
+            self.assertEqual(store.api_public_url, "https://legacy-api.example.com")
+            self.assertEqual(store.api_base_url, "https://legacy-api.example.com")
+            self.assertEqual(store.external_api_url, "https://legacy-api.example.com")
+
     def test_legacy_newapi_binding_settings_are_model_gateway_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             config_path = Path(tmp_dir) / "config.json"
